@@ -1,0 +1,32 @@
+{
+  "name": "投书口 · 银墨句法解析",
+  "short_name": "投书口",
+  "description": "投一句或一整段英文，银墨以云端 UDPipe 拆出主谓与伪成分树，双击查牛津全本词典。",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#020308",
+  "theme_color": "#020308",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

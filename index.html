@@ -1,0 +1,953 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#020308">
+<title>投书口 · 银墨句法解析</title>
+<meta name="description" content="投一句或一整段英文，银墨即以云端 UDPipe 拆出主谓、伪成分树与形态细节；双击任意词直连牛津高阶全本词典。">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<!-- ===================================================================
+  投书口 · SILVER INK · 独立句法解析站  ——  tricgrizen.com/parse/
+  一间只做一件事的暗房：投英文进来，银墨拆给你看。
+    · 解析核：云端 UDPipe（LINDAT，english-ewt）→ CoNLL-U → 依存主干着色 + 伪成分树嵌套
+    · 段落模式：一次投一整段，逐句成卡
+    · 词典：双击任意词 → 牛津高阶10 全本（同域懒加载 ../universe/dict_data.js，34MB 首次拉取）
+    · 词法细节：单击词 → 词性 / 形态特征（时态·语态·格·数，UD FEATS 人话版）/ 句中角色
+    · ?q=句子 深链 · 本地历史 50 条 · 复制结构文本
+  美学承五更书纲领：纯黑底、克制灰阶、金唯谓语与结构强调、无可见滚动条、零动画、禁 blur。
+  ★ 银墨函数（conlluParse/analyseDep/derivePseudoTree/zhLabel/renderSilver 族）与五更书 universe.html 同源手抄，
+    改宇宙侧的解析/汉化逻辑须回看此处是否需同步（反之亦然）。汉化表见 tools/parse_site/silverink_zh.json（镜像正本）
+    + feats_zh.json（站内新增）。词典渲染件（renderFull/senseHtml…）亦手抄自 universe.html。
+  铁律8口径：用户设备浏览器直连学术 HTTPS（UDPipe LINDAT）+ 同域取词典，无凭据、无绕行面
+    （同灯下 PWA 直连 GitHub API、云梯直连 LINDAT 先例）。
+  产物由 tools/parse_site/build_parse_site.py 组装（内联两张汉化表 + 生成图标/manifest），勿直接手改 web_deploy_parse/index.html。
+==================================================================== -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&display=swap" rel="stylesheet">
+<style>
+/* 工艺法典（承五更书 art 宪）：两种黑一点金；禁 blur/bloom/粒子/玻璃卡；金唯谓语与结构强调，银唯机识出处；日间零动画。 */
+:root{
+  --paper:#020308;     /* 墨黑 · 底 */
+  --chrome:#0a0c14;    /* 石黑 · 面板与词典页 */
+  --line:#14171f;
+  --ink0:#23262e;
+  --ink1:#8a8f98;      /* 半明 */
+  --gold:#d8bf8a;      /* 金 · 谓语/结构强调 */
+  --gold2:#efd9a4;
+  --dun:#97906f;       /* 哑金 · 序数 */
+  --silver:#9fa9b8;    /* 银 · 机识出处/中文小签 */
+  --txt:#c8cbd2; --dim:#5c6068; --faint:#363a42;
+  --serif:"Fraunces",Constantia,Georgia,serif;
+  --cjkd:"Songti SC","Noto Serif CJK SC",SimSun,serif;
+  --sans:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"Cascadia Mono",Consolas,"Courier New",monospace;
+  --fz:1;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+::-webkit-scrollbar{display:none}
+html{font-size:calc(16px * var(--fz));scrollbar-width:none;text-size-adjust:100%;-webkit-text-size-adjust:100%;
+  background:var(--paper)}
+@media(min-width:2200px){html{font-size:calc(24px * var(--fz))}}
+@media(min-width:3200px){html{font-size:calc(33px * var(--fz))}}
+body{background:var(--paper);color:var(--ink1);font-family:var(--sans);min-height:100vh;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+button{background:none;border:none;color:inherit;font:inherit;cursor:pointer;letter-spacing:inherit}
+textarea{background:none;border:none;color:var(--txt);font:inherit;outline:none;resize:none;width:100%}
+i,em{font-style:normal}
+.hide{display:none!important}
+
+/* ————— 页架 ————— */
+#app{max-width:56rem;margin:0 auto;padding:clamp(1.1rem,3.5vw,2.6rem) clamp(1rem,4vw,2.4rem) 5rem}
+html.kysa #app{padding-top:calc(clamp(1.1rem,3.5vw,2.6rem) + env(safe-area-inset-top,0px))}
+
+/* 顶栏 */
+#top{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:1.7rem}
+#brand{font-family:var(--cjkd);font-size:1.05rem;letter-spacing:.52em;color:var(--silver);text-indent:.52em}
+#brandkick{font-family:var(--mono);font-size:.5rem;letter-spacing:.44em;color:var(--faint);margin-top:.35rem}
+#abtn{font-family:var(--mono);font-size:.56rem;letter-spacing:.24em;color:var(--faint);white-space:nowrap}
+#abtn:hover{color:var(--dim)}
+
+/* 投书口 */
+#dock{border:1px solid var(--line);background:#06080e;padding:1rem 1.1rem .75rem}
+#dinput{font-family:var(--serif);font-size:1.06rem;line-height:1.75;letter-spacing:.005em;min-height:3.2rem;
+  max-height:40vh;overflow-y:auto}
+#dinput::placeholder{color:#2b2f38;font-family:var(--serif);font-style:italic}
+#dockbar{display:flex;align-items:center;gap:.9rem;margin-top:.7rem;flex-wrap:wrap}
+#dockbar .sp{flex:1}
+.dkb{font-family:var(--mono);font-size:.6rem;letter-spacing:.18em;color:var(--dim);border:1px solid var(--line);
+  padding:.42rem 1.1rem;white-space:nowrap}
+.dkb:hover{color:var(--txt);border-color:#2a3040}
+.dkb.go{color:var(--gold);border-color:#33302a}
+.dkb.go:hover{color:var(--gold2);border-color:#4a4436}
+.dkb.mini{border:none;padding:.42rem .3rem;color:var(--faint)}
+.dkb.mini:hover{color:var(--dim)}
+#dhint{font-family:var(--mono);font-size:.56rem;letter-spacing:.1em;color:var(--faint);white-space:nowrap}
+#dhint.busy{color:var(--silver)}
+
+/* 结果卡 */
+#results{margin-top:1.8rem}
+.card{border-top:1px solid var(--line);padding:1.5rem 0 .3rem}
+.card:first-child{border-top:none}
+.cardhd{display:flex;align-items:baseline;gap:.7rem;flex-wrap:wrap;margin-bottom:.7rem}
+.cardhd .cnum{font-family:var(--mono);font-size:.72rem;color:var(--dun)}
+.cardhd .ceng{font-family:var(--mono);font-size:.52rem;letter-spacing:.14em;color:var(--faint)}
+.cardhd .svcloud{font-family:var(--mono);font-size:.5rem;letter-spacing:.1em;border:1px solid var(--line);
+  padding:.08rem .4rem;color:var(--dim)}
+.cardhd .ccopy{font-family:var(--mono);font-size:.52rem;letter-spacing:.16em;color:var(--faint);margin-left:auto}
+.cardhd .ccopy:hover{color:var(--dim)}
+/* 整句一行：谓语暗金 / 主语近白 / 余灰 */
+.svline{font-family:var(--serif);font-size:1.12rem;line-height:2;color:var(--ink1);margin:.1rem 0 1.5rem;letter-spacing:.005em}
+.svline .w{color:var(--ink1);cursor:pointer}
+.svline .w.subj{color:#dfe2e8}
+.svline .w.pred{color:var(--gold)}
+.svline .w.punc{color:var(--faint);cursor:default}
+@media(hover:hover){.svline .w:not(.punc):hover{text-decoration:underline;text-decoration-color:var(--faint);text-underline-offset:.28em}}
+/* 成分树 / 浅层分层 */
+.svtree{font-family:var(--serif);font-size:.9rem;line-height:1.9}
+.nd{padding-left:1.15rem;border-left:1px solid var(--line);margin:.12rem 0 .12rem .1rem}
+.nd.rootnd{border-left:none;padding-left:0}
+.ndhead{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap}
+.leafw{font-family:var(--serif);font-size:.9rem;color:var(--txt);cursor:pointer}
+.leafw.pred{color:var(--gold)}
+.leafw.subj{color:#dfe2e8}
+@media(hover:hover){.leafw:hover{text-decoration:underline;text-decoration-color:var(--faint);text-underline-offset:.24em}}
+.svchunk{margin:.35rem 0}
+.svchunk .ck{font-family:var(--serif);font-size:.92rem;color:var(--txt)}
+.svchunk.pred .ck{color:var(--gold)}
+.svchunk.subj .ck{color:#dfe2e8}
+/* 中文小签（银/灰、微型、可点弹解释） */
+.zt{font-family:var(--cjkd);font-size:.6rem;letter-spacing:.06em;color:var(--silver);opacity:.72;
+  cursor:pointer;white-space:nowrap;border-bottom:1px dotted var(--faint)}
+.zt:hover{opacity:1;border-bottom-color:var(--dim)}
+.zt.untr{color:var(--dim);opacity:.6;border-bottom:none;cursor:default}
+/* 形态微签（更暗，只标不点） */
+.ft{font-family:var(--mono);font-size:.5rem;letter-spacing:.04em;color:#565a63;
+  border:1px solid #1a1d25;border-radius:2px;padding:0 .3em}
+.ft.untr{color:var(--faint)}
+
+/* 空态 */
+#empty{margin-top:2.6rem;font-family:var(--serif);font-style:italic;font-size:.95rem;line-height:2;color:#3a3e47}
+#empty b{color:var(--dim);font-weight:400;font-style:normal;font-family:var(--mono);font-size:.7rem;letter-spacing:.06em}
+
+/* 历史 */
+#histwrap{margin-top:3rem;border-top:1px solid var(--line);padding-top:1.3rem}
+#histhd{display:flex;align-items:baseline;justify-content:space-between}
+#histhd .t{font-family:var(--mono);font-size:.56rem;letter-spacing:.34em;color:var(--faint)}
+#histclr{font-family:var(--mono);font-size:.52rem;letter-spacing:.16em;color:var(--faint)}
+#histclr:hover{color:var(--dim)}
+#hist{margin-top:.9rem;display:flex;flex-direction:column;gap:.15rem}
+.hrow{font-family:var(--serif);font-size:.86rem;color:var(--dim);cursor:pointer;padding:.3rem 0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hrow:hover{color:var(--txt)}
+
+/* 页脚致谢 + 免责 */
+#foot{margin-top:3.4rem;border-top:1px solid var(--line);padding-top:1.3rem;
+  font-family:var(--mono);font-size:.54rem;letter-spacing:.06em;line-height:2.1;color:var(--faint)}
+#foot a{color:var(--dim);text-decoration:none;border-bottom:1px dotted var(--faint)}
+#foot a:hover{color:var(--silver)}
+#foot .dis{color:var(--dim)}
+
+/* 关于面板 */
+#about{position:fixed;inset:0;z-index:70;background:rgba(2,3,8,.94);overflow-y:auto;
+  padding:clamp(2.5rem,8vw,5rem) clamp(1.2rem,6vw,4rem);display:none}
+#about.on{display:block}
+#about .ab{max-width:40rem;margin:0 auto}
+#about h2{font-family:var(--cjkd);font-size:1.1rem;letter-spacing:.4em;color:var(--silver);font-weight:400;margin-bottom:1.4rem;text-indent:.4em}
+#about p{font-family:var(--serif);font-size:.92rem;line-height:2.05;color:var(--ink1);margin-bottom:1rem}
+#about p b{color:var(--txt);font-weight:400}
+#about code{font-family:var(--mono);font-size:.8rem;color:var(--gold);letter-spacing:.02em}
+#about .abx{position:fixed;top:1.3rem;right:1.5rem;font-family:var(--mono);font-size:.6rem;letter-spacing:.2em;color:var(--dim)}
+
+/* ————— 词泡（双击/单击） ————— */
+#pop{position:fixed;z-index:80;max-width:23rem;background:#07090f;border:1px solid #1c202a;
+  padding:.85rem 1.05rem;pointer-events:auto;max-height:64vh;overflow-y:auto;scrollbar-width:none;display:none}
+#pop.on{display:block}
+#pop .pw{font-family:var(--serif);font-size:1.05rem;color:#dfe2e8}
+#pop .pwph{font-family:var(--mono);font-size:.62rem;color:var(--dim);letter-spacing:.03em}
+#pop .ph{font-family:var(--mono);font-size:.66rem;color:var(--dim);margin:.15rem 0 .35rem}
+#pop .pg{font-size:.73rem;line-height:1.8;color:#9ba0a9;margin-top:.25rem}
+#pop .pb{font-family:var(--mono);font-size:.6rem;color:var(--faint);margin-top:.35rem}
+#pop .pl{font-size:.73rem;line-height:1.7;color:var(--txt)}
+#pop .pl b{color:#9ba0a9;font-family:var(--serif);font-style:italic;font-size:.66rem;font-weight:400;margin-right:.35rem}
+#pop .pdrow{font-size:.75rem;line-height:1.85;color:#9ba0a9;margin-top:.15rem}
+#pop .pdk{font-family:var(--mono);font-size:.54rem;letter-spacing:.14em;color:var(--faint);margin-right:.6rem}
+#pop .pdt{font-family:var(--cjkd);font-size:.66rem;color:var(--dim);margin-left:.4rem}
+.pgt{display:inline-block;border:1px solid #2a3040;border-radius:2px;padding:0 .3em;
+  font-family:var(--mono);font-size:.56rem;color:#bcb49e;margin-right:.35em;letter-spacing:.02em;vertical-align:.08em}
+#pop .dictlink{font-family:var(--mono);font-size:.6rem;color:var(--faint);margin-top:.5rem;
+  letter-spacing:.12em;cursor:pointer}
+#pop .dictlink:hover{color:var(--dim)}
+
+/* ————— 词典页（欧陆式·点词即跳；手抄自 universe） ————— */
+#dpage{position:fixed;inset:0;z-index:85;background:var(--chrome);overflow-y:auto;
+  padding:4.2rem clamp(1.6rem,5vw,4.5rem) 6rem;display:none}
+#dpage.on{display:block}
+#dback{position:fixed;top:1.1rem;left:1.6rem;z-index:86;font-family:var(--mono);font-size:.62rem;
+  letter-spacing:.2em;color:var(--faint)}
+#dback:hover{color:var(--dim)}
+#dbody{max-width:46rem;margin:0 auto;position:relative}
+#dbody .dh{font-family:var(--serif);font-size:2.1rem;color:#dfe2e8;letter-spacing:.01em;line-height:1.2}
+#dbody .dph{font-family:var(--mono);font-size:.72rem;color:var(--dim);margin:.4rem 0 .25rem;letter-spacing:.04em}
+#dbody .dbase{font-family:var(--mono);font-size:.62rem;color:var(--faint);letter-spacing:.1em}
+#dbody .dsense{border-left:1px solid var(--line);padding-left:1.15rem;margin:1.35rem 0}
+#dbody .dpos{font-family:var(--mono);font-size:.6rem;letter-spacing:.16em;color:#bcb49e}
+#dbody .den{font-family:var(--serif);font-size:.9rem;line-height:1.95;color:#9ba0a9}
+#dbody .dcn{font-family:var(--cjkd);font-size:.88rem;line-height:1.9;color:var(--txt);margin-top:.18rem}
+#dbody .dex{margin-top:.55rem}
+#dbody .dex .een{font-family:var(--serif);font-style:italic;font-size:.82rem;line-height:1.8;color:var(--dim)}
+#dbody .dex .ecn{font-family:var(--cjkd);font-size:.72rem;line-height:1.75;color:#565a63;margin-top:.05rem}
+#dbody .dnote{font-family:var(--cjkd);font-size:.78rem;color:var(--dim);line-height:1.95;margin-top:.4rem}
+#dbody .dw{cursor:pointer;border-bottom:1px solid transparent}
+#dbody .dw:hover{border-bottom-color:#3d3627;color:#dfe2e8}
+#dbody .dload{font-family:var(--mono);font-size:.6rem;letter-spacing:.22em;color:var(--faint);margin-bottom:1rem}
+#dbody .dload .dslow{display:block;margin-top:.5rem;color:var(--faint);opacity:.72;letter-spacing:.14em}
+#dbody .dload .dretry{color:var(--dim);cursor:pointer;border-bottom:1px dotted var(--faint)}
+@media(hover:hover){#dbody .dload .dretry:hover{color:var(--ink1)}}
+#dbody .dcorner{position:absolute;top:.2rem;right:0;font-family:var(--mono);font-size:.56rem;
+  letter-spacing:.18em;color:var(--faint);border:1px solid var(--line);padding:.2rem .6rem}
+#dbody .dchips{margin:.55rem 0 0;display:flex;gap:.45rem;flex-wrap:wrap}
+#dbody .dchip{border:1px solid #2a3040;border-radius:2px;padding:.08rem .5rem;
+  font-family:var(--mono);font-size:.58rem;color:var(--ink1);letter-spacing:.06em}
+#dbody .dpanchors{margin:1.05rem 0 0;display:flex;gap:.55rem;flex-wrap:wrap}
+#dbody .danchor{border:1px solid var(--line);padding:.14rem .7rem;font-family:var(--mono);
+  font-size:.6rem;color:var(--dim);cursor:pointer;letter-spacing:.08em}
+#dbody .danchor:hover{color:var(--txt);border-color:#333a46}
+#dbody .dentry{border-top:1px solid var(--line);margin-top:1.7rem;padding-top:1.2rem}
+#dbody .dentryhead{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap;margin-bottom:.4rem}
+#dbody .dvf{font-family:var(--mono);font-size:.62rem;color:var(--dim);margin:0 0 .7rem;letter-spacing:.04em}
+#dbody .dshcut{font-family:var(--cjkd);font-size:.8rem;letter-spacing:.28em;color:#8f94a0;margin:1.4rem 0 .45rem}
+#dbody .dnum{font-family:var(--mono);font-size:.62rem;color:var(--dun);margin-right:.15rem}
+#dbody .dlb{font-family:var(--serif);font-style:italic;font-size:.7rem;color:var(--dim)}
+#dbody .dcf{font-family:var(--serif);font-size:.78rem;color:#9ba0a9}
+#dbody .ddis{font-size:.72rem;color:var(--dim);font-family:var(--cjkd)}
+#dbody .dshead{display:flex;gap:.45rem;align-items:baseline;flex-wrap:wrap;margin-bottom:.18rem}
+#dbody .dsect{font-family:var(--cjkd);font-size:.9rem;letter-spacing:.4em;color:var(--gold);margin:2.5rem 0 1rem}
+#dbody .didm{margin:1.15rem 0;border-left:1px solid var(--line);padding-left:1.05rem}
+#dbody .didmw{font-family:var(--serif);font-size:.92rem;color:#dfe2e8;margin-bottom:.2rem}
+#dbody .dpv{margin:1.4rem 0;border-left:1px solid var(--line);padding-left:1.05rem}
+#dbody .dpvw{font-family:var(--serif);font-size:1rem;color:#dfe2e8;margin-bottom:.25rem}
+#dbody .dexcf{font-family:var(--serif);font-size:.72rem;color:#9ba0a9;margin-bottom:.04rem}
+#dbody .dsyn{font-size:.78rem;line-height:1.95;color:#9ba0a9;border:1px solid var(--line);
+  padding:.9rem 1.1rem;margin:.8rem 0;overflow-x:hidden}
+#dbody .dsyn ul,#dbody .dsyn ol{list-style:none;margin:.3rem 0}
+#dbody .dsyn li{padding-left:.9rem;position:relative}
+#dbody .dsyn li::before{content:"—";position:absolute;left:0;color:#3a3e47}
+#dbody .dsyn .xh,#dbody .dsyn .eb{color:var(--txt)}
+#dbody .dsyn .chn{color:var(--ink1)}
+#dbody .dsyn .box_title{display:block;color:#bcb49e;margin-bottom:.3rem}
+#dbody .dsyn .labels{font-style:italic;color:var(--dim)}
+#dbody details.dfold{margin:.55rem 0 0}
+#dbody details.dfold summary{font-family:var(--mono);font-size:.6rem;letter-spacing:.18em;
+  color:var(--faint);cursor:pointer;list-style:none}
+#dbody details.dfold summary::-webkit-details-marker{display:none}
+#dbody details.dfold summary::before{content:"+ ";color:#3a3e47}
+#dbody details.dfold[open] summary::before{content:"\2212 "}
+#dbody details.dfold summary:hover{color:var(--dim)}
+#dbody .dcot{font-family:var(--serif);font-style:italic;font-size:.68rem;color:var(--dim);margin-top:.5rem}
+#dbody .dcog{font-size:.78rem;line-height:1.9;color:#9ba0a9}
+#dbody .dxr{font-family:var(--cjkd);font-size:.72rem;color:var(--dim);margin-top:.45rem;line-height:1.9}
+#dbody .dxr .dxrp{font-family:var(--serif);font-style:italic;color:var(--faint)}
+#dbody .dtp{border:1px solid #2a3040;border-radius:2px;padding:0 .35em;font-family:var(--mono);
+  font-size:.56rem;color:#6b7280;letter-spacing:.04em}
+#dbody .dwo{font-size:.75rem;line-height:1.9;color:#565a63;margin-top:.5rem}
+
+/* selftest 面板 */
+#st{position:fixed;left:0;right:0;top:0;z-index:99;background:#090b11;border-bottom:1px solid #262a33;
+  padding:1rem 1.4rem;font-family:var(--mono);font-size:12px;line-height:1.7;color:#aab;white-space:pre-wrap;
+  max-height:96vh;overflow-y:auto;user-select:text;display:none}
+#st.on{display:block}
+#st.bad{color:#e2b3b3}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="top">
+    <div>
+      <div id="brand">投书口</div>
+      <div id="brandkick">SILVER INK · SYNTAX</div>
+    </div>
+    <button id="abtn">关于 · 致谢</button>
+  </div>
+
+  <div id="dock">
+    <textarea id="dinput" rows="2" spellcheck="false" autocapitalize="off" autocomplete="off"
+      placeholder="向书中投一句 —— 或一整段英文长难句。"></textarea>
+    <div id="dockbar">
+      <button class="dkb go" id="dgo">解析</button>
+      <button class="dkb mini" id="dclip">取贴</button>
+      <button class="dkb mini" id="dclear">清空</button>
+      <span class="sp"></span>
+      <span id="dhint"></span>
+    </div>
+  </div>
+
+  <div id="empty">
+    投一句进来，银墨为你拆开它的骨架。<br>
+    <b>谓语暗金 · 主语近白 · 从句缩进</b> —— 单击词看词法，双击词查全本词典。
+  </div>
+  <div id="results"></div>
+
+  <div id="histwrap" class="hide">
+    <div id="histhd"><span class="t">拾遗 · 近解</span><button id="histclr">清空</button></div>
+    <div id="hist"></div>
+  </div>
+
+  <div id="foot">
+    <div>句法解析 · <a href="https://lindat.mff.cuni.cz/services/udpipe/" target="_blank" rel="noopener">UDPipe 2</a>（<a href="https://ufal.mff.cuni.cz/udpipe" target="_blank" rel="noopener">ÚFAL LINDAT</a>，模型 english-ewt / Universal Dependencies）· 词典 · 牛津高阶英汉双解（第10版）。</div>
+    <div>UDPipe 模型依 <b>CC BY-NC-SA</b> 授权，本站仅供个人学习之非商业用途。</div>
+    <div class="dis">银墨机解，结构与形态标注仅供参考 —— 遇歧义以权威语法书与人工判读为准。</div>
+  </div>
+</div>
+
+<div id="pop"></div>
+<section id="dpage"><button id="dback">‹ 返回</button><div id="dbody"></div></section>
+<section id="about"><button class="abx">✕ 关闭</button><div class="ab">
+  <h2>投书口</h2>
+  <p>一间只做一件事的暗房：把一句（或一整段）英文投进来，<b>银墨</b>用云端句法解析把它的骨架拆给你看 —— 谓语暗金、主语近白、从句层层缩进，每个成分挂一枚中文小签。</p>
+  <p><b>怎么用。</b>粘贴或输入后点「解析」（或 <code>Ctrl/⌘ + Enter</code>）。<b>单击</b>任意英文词 → 词性、形态特征（时态·语态·格·数）与句中角色；<b>双击</b>（手机双击）任意词 → 牛津高阶全本词典。分享用 <code>?q=你的句子</code> 直达。</p>
+  <p><b>解析引擎。</b>句法来自 <b>UDPipe 2</b>（ÚFAL Charles University 的 LINDAT 学术服务，模型 english-ewt，遵循 Universal Dependencies 标注体系）。成分树是依存结构推导的<b>伪成分块</b>，为近似呈现。</p>
+  <p><b>词典。</b>牛津高阶英汉双解第 10 版全本，首次查词时按需加载（约 34MB，之后浏览器缓存）。</p>
+  <p><b>隐私。</b>解析文本直连学术 API，不经任何第三方服务器；历史仅存于你本机浏览器，可随时清空。纯静态页面，无追踪。</p>
+  <p class="dis" style="font-family:var(--mono);font-size:.6rem;color:var(--faint);letter-spacing:.1em">SILVER INK · 承《五更书》纲领 · tricgrizen.com/parse/</p>
+</div></section>
+<div id="st"></div>
+
+<script>
+"use strict";
+/* ======================= 基座 ======================= */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const now=()=>Date.now();
+const Q=new URLSearchParams(location.search);
+const ST=Q.has("selftest");
+function fatal(m){const st=$("#st");st.classList.add("on","bad");st.textContent+=(st.textContent?"\n":"")+m;}
+window.addEventListener("error",e=>fatal("ERR "+(e.message||e.type)));
+window.addEventListener("unhandledrejection",e=>fatal("REJ "+(e.reason&&e.reason.message||e.reason)));
+
+/* 汉化表（build 注入）：dep/const/pos/tag 镜像五更书正本；feats 站内新增。 */
+const SILVER_ZH={"_meta":{"title":"银墨汉化映射表 · 独立投书口站副本","desc":"把 UD 依存/词性标签 + Penn 成分标签翻成初学者友好中文。★★★ 双源手抄件：正本在 tools/eng/silverink_zh.json（五更书宇宙用），本件是 tools/parse_site/ 独立投书口站的副本。改任一侧的 dep/const/pos/tag 条目须同步另一侧。★★★ law 字段=五更书理谱节点 id，独立站无理谱页故点击小签只弹 ex 人话解释（不跳转）。表外标签一律显示原标签+「未译」灰签，禁编造。feats 形态特征汉化另置 tools/parse_site/feats_zh.json（站内新增件，正本无此表）。","engines":"UDPipe english-ewt (UD dep/upos/xpos/feats) · 云端 LINDAT","version":"PARSE-SITE-1 (源自宇宙 AH-1)"},"dep":{"ROOT":{"cn":"句子主干","ex":"整句的中心，通常是主句谓语动词——拆句先找它。","law":"predicate-verb"},"root":{"cn":"句子主干","ex":"整句的中心，通常是主句谓语动词——拆句先找它。","law":"predicate-verb"},"nsubj":{"cn":"主语","ex":"动作的发出者、句子在讲的那个人或物。","law":"subject"},"nsubjpass":{"cn":"被动句主语","ex":"被动句里承受动作的主语（书被读＝book 是主语）。","law":"passive-voice"},"csubj":{"cn":"主语从句","ex":"一整个从句充当主语（What he said 让人吃惊）。","law":"subject-clause"},"csubjpass":{"cn":"被动主语从句","ex":"从句充当被动句的主语。","law":"subject-clause"},"expl":{"cn":"形式主语/引导词","ex":"占位的 there/it，本身无实义（There is…／It is said…）。","law":"there-be"},"dobj":{"cn":"直接宾语","ex":"动作直接作用的对象（read a book 里的 book）。","law":"object"},"obj":{"cn":"宾语","ex":"动作作用的对象。","law":"object"},"iobj":{"cn":"间接宾语","ex":"动作的接受者，常是「给谁」（give her a book 里的 her）。","law":"object"},"dative":{"cn":"间接宾语（与格）","ex":"「给谁/为谁」的那一方，双宾语里的间接宾语。","law":"object"},"pobj":{"cn":"介词宾语","ex":"介词后面带的名词（in the room 里的 room）。","law":"object"},"pcomp":{"cn":"介词后补足","ex":"介词后接的从句或动名词（of doing… / on what he said）。","law":"preposition"},"attr":{"cn":"表语","ex":"系动词后说明主语「是什么/怎么样」（He is a teacher 里的 teacher）。","law":"predicative"},"acomp":{"cn":"表语形容词","ex":"系动词后的形容词补语（She is happy 里的 happy）。","law":"predicative"},"oprd":{"cn":"宾语补足语","ex":"补充说明宾语状态（paint it red 里的 red）。","law":"complement"},"ccomp":{"cn":"宾语从句","ex":"作宾语的完整从句，有自己的主语（I think that…）。","law":"object-clause"},"xcomp":{"cn":"非谓语补足","ex":"无独立主语的补足成分，常是不定式/分词（want to go 里的 to go）。","law":"complement"},"aux":{"cn":"助动词","ex":"帮主动词构成时态/语态/疑问的动词（have/do/will/be）。","law":"auxiliary"},"auxpass":{"cn":"被动助动词","ex":"构成被动语态的 be（was written 里的 was）。","law":"passive-voice"},"cop":{"cn":"系动词","ex":"连接主语和表语的 be/become/seem 等，本身不表动作。","law":"linking-verb"},"neg":{"cn":"否定词","ex":"not/never 等，把意思翻成否定。","law":"negation"},"det":{"cn":"限定词","ex":"名词前的 a/the/this/some，界定范围。","law":"determiner"},"predet":{"cn":"前位限定词","ex":"限定词之前的词（all the books 里的 all）。","law":"determiner"},"preconj":{"cn":"前置关联词","ex":"关联并列的第一半（both…and 里的 both）。","law":"conjunction"},"prep":{"cn":"介词","ex":"表方位/时间/方式的 in/on/with，后接名词构成介词短语。","law":"preposition"},"case":{"cn":"格标记","ex":"介词或所有格 's，标出名词的语法角色。","law":"preposition"},"prt":{"cn":"动词小品词","ex":"和动词固定搭配改变词义（give up 里的 up）。","law":null},"amod":{"cn":"定语（形容词）","ex":"修饰名词、说明它「什么样」的形容词（red car 里的 red）。","law":"attributive"},"advmod":{"cn":"状语（副词）","ex":"修饰动词/形容词，说明「怎样/多么/何时」（runs fast 里的 fast）。","law":"adverbial"},"npadvmod":{"cn":"名词性状语","ex":"名词短语当状语用（this morning／ten miles）。","law":"adverbial"},"nummod":{"cn":"数量定语","ex":"修饰名词的数词（three books 里的 three）。","law":"numeral"},"quantmod":{"cn":"数量修饰","ex":"修饰数量的词（about ten 里的 about）。","law":"quantifier"},"amod-comp":{"cn":"比较定语","ex":"比较级/最高级形容词作定语。","law":"comparison-degree"},"appos":{"cn":"同位语","ex":"紧跟名词、换个说法解释它（my friend Tom 里的 Tom）。","law":"appositive"},"acl":{"cn":"名词的分句修饰","ex":"修饰名词的从句/非谓语（the man standing there）。","law":"relative-clause"},"relcl":{"cn":"定语从句","ex":"用 who/which/that 引导、修饰前面名词的从句。","law":"relative-clause"},"advcl":{"cn":"状语从句","ex":"表时间/原因/条件/让步等的从句（when he came…）。","law":"adverbial-clause"},"mark":{"cn":"从句引导词","ex":"引出从句的 that/if/because/although 等标句词。","law":"conjunction"},"agent":{"cn":"施动者（by 短语）","ex":"被动句里表「被谁」的 by 短语（by the boy）。","law":"passive-voice"},"compound":{"cn":"复合成分","ex":"两个词合成一个概念（credit card 里的 credit）。","law":null},"conj":{"cn":"并列成分","ex":"用 and/or/but 与前面对等相连的部分。","law":"parallelism"},"cc":{"cn":"并列连词","ex":"连接对等成分的 and/or/but。","law":"conjunction"},"poss":{"cn":"所有格/物主","ex":"表所属的 my/his 或 's（Tom's book 里的 Tom's）。","law":"noun-genitive"},"nmod":{"cn":"名词修饰语","ex":"修饰名词的另一名词/短语。","law":"attributive"},"npmod":{"cn":"名词短语状语","ex":"名词短语作状语（a bit tired 里的 a bit）。","law":"adverbial"},"obl":{"cn":"旁格状语","ex":"介词短语等作状语，表时间/地点/方式。","law":"adverbial"},"parataxis":{"cn":"松散并列","ex":"不靠连词、并置在一起的分句（插入说明、引语等）。","law":"parenthesis"},"intj":{"cn":"感叹词","ex":"Oh/Wow 等表情绪、不进句法结构的词。","law":"interjection"},"discourse":{"cn":"话语标记","ex":"well/anyway 等衔接语气、不改变句义的词。","law":null},"vocative":{"cn":"呼语","ex":"直接称呼对方的名字（Tom, come here 里的 Tom）。","law":null},"meta":{"cn":"元信息","ex":"标注类杂项，非句子实义成分。","law":null},"dep":{"cn":"未定关系","ex":"解析器无法归类的依存关系（多见于口语/残句）。","law":null},"nsubj:pass":{"cn":"被动句主语","ex":"被动句里承受动作的主语（The book was read 里的 book）。","law":"passive-voice"},"csubj:pass":{"cn":"被动主语从句","ex":"从句充当被动句的主语。","law":"subject-clause"},"aux:pass":{"cn":"被动助动词","ex":"构成被动语态的 be（was written 里的 was）。","law":"passive-voice"},"acl:relcl":{"cn":"定语从句","ex":"用 who/which/that 引导、修饰前面名词的从句。","law":"relative-clause"},"obl:tmod":{"cn":"时间状语","ex":"名词短语直接作时间状语（this morning／last year）。","law":"adverbial"},"obl:npmod":{"cn":"名词短语状语","ex":"名词短语作程度/方式状语（a bit tired 里的 a bit）。","law":"adverbial"},"obl:agent":{"cn":"施动者（by 短语）","ex":"被动句里表「被谁」的 by 短语（by the boy）。","law":"passive-voice"},"nmod:poss":{"cn":"所有格/物主","ex":"表所属的 my/his 或 's（Tom's book 里的 Tom's）。","law":"noun-genitive"},"compound:prt":{"cn":"动词小品词","ex":"和动词固定搭配改变词义（give up 里的 up）。","law":null},"det:predet":{"cn":"前位限定词","ex":"限定词之前的词（all the books 里的 all）。","law":"determiner"},"cc:preconj":{"cn":"前置关联词","ex":"关联并列的第一半（both…and 里的 both）。","law":"conjunction"},"flat:name":{"cn":"平列专名","ex":"专有名词内部平列的词（New York 里的 York）。","law":null},"goeswith":{"cn":"拼写接续","ex":"被误拆开的同一个词的后半段。","law":null},"reparandum":{"cn":"口误改口","ex":"说话中途被改掉的部分（口语转写常见）。","law":null},"dislocated":{"cn":"移位成分","ex":"被挪到句首/句尾、靠代词回指的成分（口语常见）。","law":null},"orphan":{"cn":"省略残联","ex":"谓语被省略后剩下的成分间接续关系（gapping 省略）。","law":"ellipsis"},"flat":{"cn":"平列专名","ex":"专有名词内部平列的词（New York 里的 York）。","law":null},"fixed":{"cn":"固定搭配","ex":"多词固定短语的内部构件（as well as）。","law":null},"punct":{"cn":"标点","ex":"逗号/句号等，不表意但界定结构。","law":"punctuation-syntax"}},"const":{"S":{"cn":"句子/分句","ex":"一个有主谓的完整分句，是拆句的基本积木。","law":"simple-sentence"},"SBAR":{"cn":"从句","ex":"带引导词（that/which/because…）的从属分句整块。","law":"clause-overview"},"SBARQ":{"cn":"特殊疑问句","ex":"由 wh- 词引导的疑问句（What did he say?）。","law":null},"SQ":{"cn":"疑问倒装句","ex":"一般疑问句里助动词提到主语前的倒装（Did he go?）。","law":"inversion"},"SINV":{"cn":"倒装陈述句","ex":"主谓倒装的陈述句（Never have I seen…）。","law":"inversion"},"NP":{"cn":"名词短语","ex":"以名词为核心的一组词，常作主语/宾语。","law":"noun"},"VP":{"cn":"动词短语","ex":"以动词为核心、含宾语状语的一组词，句子的谓语部分。","law":"predicate-verb"},"PP":{"cn":"介词短语","ex":"介词+名词，作定语或状语（in the room）。","law":"preposition"},"ADJP":{"cn":"形容词短语","ex":"以形容词为核心的一组词（very happy）。","law":"adjective"},"ADVP":{"cn":"副词短语","ex":"以副词为核心的一组词（quite slowly）。","law":"adverb"},"WHNP":{"cn":"wh-名词短语","ex":"含 who/what/which 的名词短语，引导从句或疑问。","law":"relative-pronoun"},"WHPP":{"cn":"wh-介词短语","ex":"含 wh- 词的介词短语（in which）。","law":"preposition"},"WHADJP":{"cn":"wh-形容词短语","ex":"含 wh- 词的形容词短语（how big）。","law":"adjective"},"WHADVP":{"cn":"wh-副词短语","ex":"含 when/where/why/how 的副词短语，常引导从句。","law":"relative-adverb"},"PRT":{"cn":"动词小品词","ex":"和动词搭配的 up/off 等（give up 里的 up）。","law":null},"QP":{"cn":"数量短语","ex":"表数量的一组词（more than half）。","law":"quantifier"},"CONJP":{"cn":"连词短语","ex":"多词连词（as well as / rather than）。","law":"conjunction"},"FRAG":{"cn":"残句片段","ex":"不成完整句的片段（标题、省略句常见）。","law":null},"INTJ":{"cn":"感叹语","ex":"表情绪的插入语（Oh, well）。","law":"interjection"},"LST":{"cn":"列表标记","ex":"列举时的序号标记（1. / a)）。","law":null},"NAC":{"cn":"名词性修饰组","ex":"作修饰用的名词性成分（不是标准 NP）。","law":"noun"},"NX":{"cn":"名词核心组","ex":"复杂名词短语内部的名词核心。","law":"noun"},"NML":{"cn":"名词修饰组","ex":"名词短语内部的多词修饰组。","law":"noun"},"PRN":{"cn":"插入语","ex":"括号/破折号插入的补充说明。","law":"parenthesis"},"RRC":{"cn":"简化关系分句","ex":"省略关系词和 be 的定语从句（the man responsible）。","law":"relative-clause"},"UCP":{"cn":"异类并列","ex":"不同词类被 and/or 并列在一起。","law":"parallelism"},"X":{"cn":"未知成分","ex":"解析器无法归类的成分。","law":null},"INFP":{"cn":"不定式短语","ex":"to+动词原形构成的短语，可作主语/宾语/定语/状语。","law":"infinitive"},"PTCPP":{"cn":"分词短语","ex":"现在分词/过去分词带出的短语，作定语或状语。","law":"present-participle"},"GERP":{"cn":"动名词短语","ex":"动词-ing 当名词用的短语，可作主语或宾语。","law":"gerund"}},"pos":{"ADJ":{"cn":"形容词","ex":"描述人或物性质状态的词（big/red/happy）。","law":"adjective"},"ADP":{"cn":"介词","ex":"表方位/时间/方式，后接名词（in/on/with）。","law":"preposition"},"ADV":{"cn":"副词","ex":"修饰动词/形容词，表怎样/多么/何时（quickly/very）。","law":"adverb"},"AUX":{"cn":"助动词/系动词","ex":"be/have/do/will/情态动词，帮主动词或连接表语。","law":"auxiliary"},"CCONJ":{"cn":"并列连词","ex":"连接对等成分的 and/or/but。","law":"conjunction"},"DET":{"cn":"限定词","ex":"名词前的 a/the/this/some，界定范围。","law":"determiner"},"INTJ":{"cn":"感叹词","ex":"表情绪的 Oh/Wow/Ouch。","law":"interjection"},"NOUN":{"cn":"名词","ex":"表示人/事/物/概念的词（book/idea）。","law":"noun"},"NUM":{"cn":"数词","ex":"表数目或顺序（three/first）。","law":"numeral"},"PART":{"cn":"小品词","ex":"不定式 to、否定 not、所有格 's 等功能小词。","law":null},"PRON":{"cn":"代词","ex":"代替名词的词（he/it/who/this）。","law":"pronoun"},"PROPN":{"cn":"专有名词","ex":"特定人名/地名/机构名（Tom/London）。","law":"noun"},"PUNCT":{"cn":"标点","ex":"逗号/句号等标点符号。","law":"punctuation-syntax"},"SCONJ":{"cn":"从属连词","ex":"引导从句的 because/if/although/that。","law":"conjunction"},"SYM":{"cn":"符号","ex":"货币/数学等符号（$/%/=）。","law":null},"VERB":{"cn":"动词","ex":"表动作或状态的词，句子谓语的核心。","law":"verb-system"},"X":{"cn":"其他","ex":"无法归类的词（外来词/乱码）。","law":null},"SPACE":{"cn":"空白","ex":"空格/换行占位，非实义。","law":null}},"tag":{"CC":{"cn":"并列连词","ex":"and/or/but 连接对等成分。","law":"conjunction"},"CD":{"cn":"基数词","ex":"表数目的 one/two/100。","law":"numeral"},"DT":{"cn":"限定词/冠词","ex":"a/the/this/these 界定名词。","law":"determiner"},"EX":{"cn":"存在句 there","ex":"There is/are 里的引导词 there。","law":"there-be"},"FW":{"cn":"外来词","ex":"非英语的借词（et cetera）。","law":null},"IN":{"cn":"介词/从属连词","ex":"in/on 或 because/that，接名词或引导从句。","law":"preposition"},"JJ":{"cn":"形容词","ex":"描述性质状态（big/red）。","law":"adjective"},"JJR":{"cn":"形容词比较级","ex":"更…的形容词（bigger/better）。","law":"comparison-degree"},"JJS":{"cn":"形容词最高级","ex":"最…的形容词（biggest/best）。","law":"comparison-degree"},"LS":{"cn":"列表项标记","ex":"列举序号（1./a)）。","law":null},"MD":{"cn":"情态动词","ex":"can/could/may/must/will，表能力/推测/义务。","law":"modal-verbs"},"NN":{"cn":"名词（单数）","ex":"单数或不可数名词（book/water）。","law":"noun"},"NNS":{"cn":"名词（复数）","ex":"复数名词（books）。","law":"noun-number"},"NNP":{"cn":"专有名词","ex":"特定名称（Tom/London）。","law":"noun"},"NNPS":{"cn":"专有名词复数","ex":"复数专有名词（the Alps）。","law":"noun"},"PDT":{"cn":"前位限定词","ex":"限定词之前（all the / both the）。","law":"determiner"},"POS":{"cn":"所有格标记","ex":"名词后的 's（Tom's）。","law":"noun-genitive"},"PRP":{"cn":"人称代词","ex":"I/you/he/it/they。","law":"pronoun"},"PRP$":{"cn":"物主代词","ex":"my/your/his/their，表所属。","law":"pronoun"},"RB":{"cn":"副词","ex":"修饰动词/形容词（quickly/very）。","law":"adverb"},"RBR":{"cn":"副词比较级","ex":"更…地（faster/more slowly）。","law":"comparison-degree"},"RBS":{"cn":"副词最高级","ex":"最…地（fastest/most）。","law":"comparison-degree"},"RP":{"cn":"小品词","ex":"动词短语里的 up/off（give up）。","law":null},"SYM":{"cn":"符号","ex":"数学/货币符号。","law":null},"TO":{"cn":"不定式 to","ex":"不定式标记 to（to go）。","law":"infinitive"},"UH":{"cn":"感叹词","ex":"Oh/Wow 等。","law":"interjection"},"VB":{"cn":"动词原形","ex":"不带词尾的动词（go/be）。","law":"verb-system"},"VBD":{"cn":"动词过去式","ex":"一般过去时（went/was）。","law":"past-simple"},"VBG":{"cn":"现在分词/动名词","ex":"-ing 形式（going），作进行时/分词/动名词。","law":"present-participle"},"VBN":{"cn":"过去分词","ex":"-ed/第三态（written），作完成时/被动/分词。","law":"past-participle"},"VBP":{"cn":"动词现在（非三单）","ex":"一般现在时非三单（I go/they run）。","law":"present-simple"},"VBZ":{"cn":"动词现在（三单）","ex":"一般现在时第三人称单数（goes/is）。","law":"present-simple"},"WDT":{"cn":"关系/疑问限定词","ex":"which/that 引导定语从句或疑问。","law":"relative-pronoun"},"WP":{"cn":"关系/疑问代词","ex":"who/what/whom 引导从句或疑问。","law":"relative-pronoun"},"WP$":{"cn":"关系物主代词","ex":"whose，表所属并引导从句。","law":"relative-pronoun"},"WRB":{"cn":"关系/疑问副词","ex":"when/where/why/how 引导从句或疑问。","law":"relative-adverb"},"HYPH":{"cn":"连字符","ex":"连接复合词的 -（well-known）。","law":"punctuation-syntax"},"NFP":{"cn":"非常规标点","ex":"省略号/波浪线等特殊标点。","law":"punctuation-syntax"},"ADD":{"cn":"网址/邮箱","ex":"URL 或 email 地址。","law":null},"XX":{"cn":"未知","ex":"无法归类的记号。","law":null},"AFX":{"cn":"词缀","ex":"作前后缀的构词成分（anti-）。","law":null},".":{"cn":"句末标点","ex":"句号/问号/感叹号。","law":"punctuation-syntax"},",":{"cn":"逗号","ex":"分隔成分的逗号。","law":"punctuation-syntax"},":":{"cn":"冒号/分号","ex":"冒号/分号/破折号。","law":"punctuation-syntax"},"``":{"cn":"左引号","ex":"开始引语的引号。","law":"punctuation-syntax"},"''":{"cn":"右引号","ex":"结束引语的引号。","law":"punctuation-syntax"},"-LRB-":{"cn":"左括号","ex":"左圆括号 (。","law":"punctuation-syntax"},"-RRB-":{"cn":"右括号","ex":"右圆括号 )。","law":"punctuation-syntax"},"$":{"cn":"货币符号","ex":"$ / ￥ 等货币记号。","law":null},"#":{"cn":"井号","ex":"# 号。","law":null},"_SP":{"cn":"空白","ex":"空格/换行占位。","law":null}}};
+const FEATS_ZH={"_meta":{"title":"UD 形态特征 (FEATS) 汉化表 · 独立投书口站词法细节","desc":"把 CoNLL-U 第 6 列 (FEATS) 的 Universal Dependencies v2 形态特征翻成初学者中文。值取自 UD 官方特征定义 (universaldependencies.org/u/feat/)，非编造。站内新增件，五更书宇宙侧无此表。渲染顺序见 order；表外键值一律显示原标签+『未译』，禁编造。","source":"Universal Dependencies v2 official feature inventory","version":"PARSE-SITE-1"},"order":["VerbForm","Tense","Aspect","Voice","Mood","Number","Person","Case","Degree","PronType","Definite","Poss","Reflex","NumType","NumForm","Polarity","Foreign","Abbr","Typo","AdpType","PartType","ConjType","Style"],"cat":{"VerbForm":"动词形式","Tense":"时态","Aspect":"体","Voice":"语态","Mood":"语气","Number":"数","Person":"人称","Case":"格","Gender":"性","Degree":"级","PronType":"代词类别","Definite":"定指","Poss":"所有格","Reflex":"反身","NumType":"数词类别","NumForm":"数字写法","Polarity":"极性","Foreign":"外来","Abbr":"缩写","Typo":"拼写","AdpType":"介词类别","PartType":"小品词类别","ConjType":"连词类别","Style":"语体"},"val":{"VerbForm=Fin":"限定动词","VerbForm=Inf":"不定式","VerbForm=Part":"分词","VerbForm=Ger":"动名词","VerbForm=Sup":"目的分词","VerbForm=Conv":"副动词","VerbForm=Gdv":"动形词","VerbForm=Vnoun":"动名词","Tense=Past":"过去时","Tense=Pres":"现在时","Tense=Fut":"将来时","Tense=Imp":"过去未完成时","Tense=Pqp":"过去完成时","Aspect=Imp":"未完成体","Aspect=Perf":"完成体","Aspect=Prog":"进行体","Aspect=Hab":"习惯体","Aspect=Prosp":"将行体","Aspect=Iter":"反复体","Voice=Act":"主动语态","Voice=Pass":"被动语态","Voice=Mid":"中动语态","Voice=Rcp":"相互语态","Voice=Cau":"使役语态","Voice=Antip":"反被动语态","Mood=Ind":"陈述语气","Mood=Imp":"祈使语气","Mood=Sub":"虚拟语气","Mood=Cnd":"条件语气","Mood=Pot":"可能语气","Mood=Jus":"劝诫语气","Mood=Nec":"必要语气","Mood=Opt":"愿望语气","Mood=Des":"意愿语气","Mood=Qot":"引述语气","Mood=Prp":"目的语气","Mood=Adm":"惊讶语气","Number=Sing":"单数","Number=Plur":"复数","Number=Dual":"双数","Number=Tri":"三数","Number=Pauc":"少量数","Number=Grpa":"群体复数","Number=Grpl":"群体单数","Number=Ptan":"复数形单义","Number=Coll":"集合数","Number=Count":"计量复数","Person=0":"零人称","Person=1":"第一人称","Person=2":"第二人称","Person=3":"第三人称","Person=4":"第四人称","Case=Nom":"主格","Case=Acc":"宾格","Case=Gen":"属格","Case=Dat":"与格","Case=Voc":"呼格","Case=Loc":"方位格","Case=Ins":"工具格","Case=Abl":"夺格","Case=Par":"部分格","Case=Ess":"样态格","Case=Tra":"变格","Case=Com":"共同格","Case=Abe":"缺格","Gender=Masc":"阳性","Gender=Fem":"阴性","Gender=Neut":"中性","Gender=Com":"通性","Degree=Pos":"原级","Degree=Cmp":"比较级","Degree=Sup":"最高级","Degree=Abs":"绝对最高级","Degree=Equ":"同等级","Degree=Dim":"小称","Degree=Aug":"增强级","PronType=Art":"冠词","PronType=Prs":"人称代词","PronType=Rcp":"相互代词","PronType=Rel":"关系词","PronType=Dem":"指示词","PronType=Int":"疑问词","PronType=Ind":"不定代词","PronType=Neg":"否定词","PronType=Tot":"全指词","PronType=Exc":"感叹词","PronType=Emp":"强调词","Definite=Def":"定指","Definite=Ind":"不定指","Definite=Spec":"特指","Definite=Cons":"构式态","Definite=Com":"复合定指","Poss=Yes":"所有格/物主","Reflex=Yes":"反身","NumType=Card":"基数","NumType=Ord":"序数","NumType=Mult":"倍数","NumType=Frac":"分数","NumType=Sets":"组数","NumType=Dist":"分配数","NumType=Range":"范围数","NumForm=Word":"拼写数字","NumForm=Digit":"阿拉伯数字","NumForm=Roman":"罗马数字","NumForm=Combi":"混合写法","Polarity=Neg":"否定","Polarity=Pos":"肯定","Foreign=Yes":"外来词","Abbr=Yes":"缩写","Typo=Yes":"疑似拼写错误","AdpType=Prep":"前置介词","AdpType=Post":"后置介词","AdpType=Circ":"框式介词","AdpType=Voc":"呼语介词","PartType=Mod":"情态小品词","PartType=Emp":"强调小品词","PartType=Res":"应答词","PartType=Inf":"不定式标记","PartType=Vbp":"动词小品词","ConjType=Comp":"比较连词","ConjType=Oper":"运算连词","Style=Arch":"古体","Style=Rare":"罕用","Style=Form":"正式","Style=Coll":"口语","Style=Vrnc":"方言","Style=Slng":"俚语","Style=Expr":"表现性","Style=Vulg":"粗俗"}};
+
+/* ======================= 银墨核 · 与 universe.html 同源手抄 ======================= */
+const UDPIPE_URL=window.__UDPIPE_URL||"https://lindat.mff.cuni.cz/services/udpipe/api/process";
+const SUBJ_DEP=new Set(["nsubj","nsubjpass","csubj","csubjpass","expl","nsubj:pass","csubj:pass"]);
+
+/* 汉化：表内命中→{cn,ex,law}；UD 冒号子类回落基关系；表外→原标签+「未译」（禁编造）。
+   独立站无理谱页，law 仅作有无标记，点击一律弹 ex 人话解释（不跳转）。 */
+function zhLabel(kind,raw){
+  raw=raw==null?"":String(raw);
+  const tbl=SILVER_ZH&&SILVER_ZH[kind];
+  let z=tbl&&tbl[raw];
+  if(!z&&tbl&&raw.indexOf(":")>0)z=tbl[raw.split(":")[0]];
+  if(z)return{cn:z.cn,ex:z.ex||null,law:z.law||null,untr:false};
+  return{cn:(raw||"?")+" · 未译",ex:null,law:null,untr:true};
+}
+function ztHtml(z){
+  if(!z||z.untr)return '<span class="zt untr">'+esc(z?z.cn:"未译")+"</span>";
+  return '<span class="zt" data-ex="'+esc(z.ex||z.cn)+'" title="'+esc(z.ex||"")+'">'+esc(z.cn)+"</span>";
+}
+function svTag(kind,raw){return ztHtml(zhLabel(kind,raw));}
+
+/* 形态特征（FEATS）→ 人话（站内 feats 表；表外原样+未译）。order 排序、val 全键优先、cat 已知类别缺值才标未译。 */
+function featsList(str){
+  if(!str||str==="_")return [];
+  const order=(FEATS_ZH&&FEATS_ZH.order)||[], val=(FEATS_ZH&&FEATS_ZH.val)||{}, cat=(FEATS_ZH&&FEATS_ZH.cat)||{};
+  const pairs=String(str).split("|").map(p=>{const i=p.indexOf("=");return i<0?null:{k:p.slice(0,i),v:p.slice(i+1),kv:p};}).filter(Boolean);
+  pairs.sort((a,b)=>{let ia=order.indexOf(a.k),ib=order.indexOf(b.k);if(ia<0)ia=99;if(ib<0)ib=99;return ia-ib||0;});
+  const out=[];
+  pairs.forEach(p=>{
+    if(p.k.indexOf("[")>=0)return;               /* 领属者从属特征（Gender[psor] 等）对学习者是噪声，静默略过 */
+    const z=val[p.kv];
+    if(z){out.push({cn:z,untr:false});return;}
+    if(cat[p.k])out.push({cn:cat[p.k]+"="+p.v+" · 未译",untr:true}); /* 已知类别缺此值：标未译，禁编造 */
+  });
+  return out;
+}
+function featsTags(str){return featsList(str).map(f=>'<span class="ft'+(f.untr?" untr":"")+'">'+esc(f.cn)+"</span>").join("");}
+
+/* CoNLL-U 十列（第 6 列 FEATS 一并留）→ 按句拆块（# text 或空行为界；每句本地下标 0 起，供 analyseDep/derivePseudoTree） */
+function conlluSplit(cu){
+  const sents=[]; let cur=null;
+  const flush=()=>{if(cur&&cur.tokens.length)sents.push(cur);cur=null;};
+  String(cu||"").split("\n").forEach(line=>{
+    if(!line.trim()){flush();return;}
+    if(line[0]==="#"){const m=line.match(/^#\s*text\s*=\s*(.*)$/);
+      if(m){flush();cur={text:m[1].trim(),tokens:[]};}return;}
+    const c=line.split("\t"); if(c.length<8)return;
+    if(!/^\d+$/.test(c[0]))return;               /* 跳 1-2 多词段与 1.1 空节点 */
+    if(!cur)cur={text:"",tokens:[]};
+    const li=+c[0];
+    cur.tokens.push({i:li-1,text:c[1],lemma:c[2],pos:c[3],
+      tag:(c[4]&&c[4]!=="_")?c[4]:c[3],feats:(c[5]&&c[5]!=="_")?c[5]:"",
+      dep:c[7],head:c[6]==="0"?li-1:(+c[6])-1,root:c[6]==="0"});
+  });
+  flush();
+  sents.forEach(s=>{if(!s.text)s.text=s.tokens.map(t=>t.text).join(" ");});
+  return sents;
+}
+/* 单句 CoNLL-U → 平铺 token 表（selftest 用；文档级连续下标） */
+function conlluParse(cu){
+  const toks=[];let base=0,localMax=0;
+  String(cu||"").split("\n").forEach(line=>{
+    if(!line.trim()){if(localMax){base+=localMax;localMax=0;}return;}
+    if(line[0]==="#")return;
+    const c=line.split("\t");if(c.length<8)return;
+    if(!/^\d+$/.test(c[0]))return;
+    const li=+c[0];if(li>localMax)localMax=li;
+    toks.push({i:base+li-1,text:c[1],lemma:c[2],pos:c[3],tag:(c[4]&&c[4]!=="_")?c[4]:c[3],
+      feats:(c[5]&&c[5]!=="_")?c[5]:"",dep:c[7],head:c[6]==="0"?base+li-1:base+(+c[6])-1,root:c[6]==="0"});
+  });
+  return toks;
+}
+/* 依存 token 表 → 主干着色 + 浅层成分（与炉端 analyse_sent 同构；UD 冒号风味一并认） */
+function analyseDep(T){
+  const AUXD=new Set(["aux","auxpass","aux:pass","cop"]);
+  const byI={};T.forEach(t=>byI[t.i]=t);
+  const kids={};T.forEach(t=>{if(!t.root&&t.head!==t.i)(kids[t.head]=kids[t.head]||[]).push(t);});
+  const subtree=t=>{const out=[];(function go(x){out.push(x.i);(kids[x.i]||[]).forEach(go);})(t);return out.sort((a,b)=>a-b);};
+  const roots=T.filter(t=>t.root||t.dep==="root"||t.dep==="ROOT").map(t=>t.i);
+  const pred=new Set(),subj=new Set(),shallow=[];
+  roots.forEach(ri=>{
+    const core=[ri];
+    (kids[ri]||[]).forEach(c=>{if(AUXD.has(c.dep))core.push(c.i);});
+    core.sort((a,b)=>a-b);core.forEach(x=>pred.add(x));
+    (kids[ri]||[]).forEach(c=>{if(c.dep==="conj"&&(c.pos==="VERB"||c.pos==="AUX")){pred.add(c.i);
+        (kids[c.i]||[]).forEach(cc=>{if(AUXD.has(cc.dep))pred.add(cc.i);});}});
+    shallow.push({dep:"__predicate",text:core.map(i=>byI[i].text).join(" "),tokens:core});
+    (kids[ri]||[]).sort((a,b)=>a.i-b.i).forEach(c=>{
+      if(core.indexOf(c.i)>=0||c.dep==="punct")return;
+      const sub=subtree(c);
+      if(SUBJ_DEP.has(c.dep))sub.forEach(x=>subj.add(x));
+      shallow.push({dep:c.dep,text:sub.map(i=>byI[i].text).join(" "),tokens:sub});
+    });
+  });
+  shallow.sort((a,b)=>(a.tokens[0]||0)-(b.tokens[0]||0));
+  return{roots,predicate:[...pred].sort((a,b)=>a-b),subject:[...subj].sort((a,b)=>a-b),shallow};
+}
+/* 伪成分块：依存树 → 短语级嵌套树（真 benepar 缺席时的替补渲染）。规则见 universe 原注。 */
+function derivePseudoTree(T){
+  const byI={};T.forEach(t=>byI[t.i]=t);
+  const kids={};T.forEach(t=>{if(!t.root&&t.head!==t.i)(kids[t.head]=kids[t.head]||[]).push(t);});
+  const memo={};
+  function span(t){if(memo[t.i])return memo[t.i];
+    let out=[t.i];(kids[t.i]||[]).forEach(c=>{out=out.concat(span(c));});
+    out.sort((a,b)=>a-b);return memo[t.i]=out;}
+  const CLAUSE={advcl:1,ccomp:1,csubj:1,"csubj:pass":1,csubjpass:1,"acl:relcl":1,relcl:1,acl:1,xcomp:1};
+  const isRootT=t=>t.root||t.dep==="root"||t.dep==="ROOT";
+  function leafOf(t){return{label:"",labels:[],children:[],leaf:true,text:t.text,tokens:[t.i],tag:t.tag,pos:t.pos};}
+  function labelOf(t){
+    const dep=t.dep||"", ks=kids[t.i]||[];
+    if(CLAUSE[dep]){
+      const mark=ks.find(c=>c.dep==="mark");
+      const hasTo=ks.some(c=>(c.dep==="mark"||c.dep==="aux")&&/^to$/i.test(c.text));
+      if(hasTo&&(t.tag==="VB"||t.pos==="VERB"))return{k:"const",v:"INFP"};
+      if(!mark&&t.tag==="VBG")return(dep==="xcomp"||dep==="ccomp"||dep==="csubj")?{k:"const",v:"GERP"}:{k:"const",v:"PTCPP"};
+      if(!mark&&t.tag==="VBN")return{k:"const",v:"PTCPP"};
+      return{k:"dep",v:dep==="relcl"?"acl:relcl":dep};
+    }
+    if(t.pos==="VERB"||t.pos==="AUX")return isRootT(t)?{k:"const",v:"S"}:{k:"const",v:"VP"};
+    if(t.pos==="ADP")return{k:"const",v:"PP"};
+    if(t.pos==="ADJ")return{k:"const",v:"ADJP"};
+    if(t.pos==="ADV")return{k:"const",v:"ADVP"};
+    if(t.pos==="NOUN"||t.pos==="PROPN"||t.pos==="PRON"||t.pos==="NUM")
+      return ks.some(c=>c.dep==="case")?{k:"const",v:"PP"}:{k:"const",v:"NP"};
+    return{k:"const",v:""};
+  }
+  function build(t){
+    const ks=(kids[t.i]||[]).slice().sort((a,b)=>a.i-b.i);
+    if(!ks.length)return leafOf(t);
+    const sp=span(t);
+    if(sp[sp.length-1]-sp[0]+1!==sp.length)
+      return{label:"",labels:[],flat:true,leaf:false,tokens:sp,children:sp.map(i=>leafOf(byI[i]))};
+    const lb=labelOf(t);
+    const seq=ks.map(c=>({at:span(c)[0],mk:()=>build(c)}));
+    seq.push({at:t.i,mk:()=>leafOf(t)});
+    seq.sort((a,b)=>a.at-b.at);
+    return{label:lb.v,lkind:lb.k,labels:lb.v?[lb.v]:[],leaf:false,tokens:sp,children:seq.map(s=>s.mk())};
+  }
+  const roots=T.filter(isRootT);
+  if(!roots.length)return null;
+  const trees=roots.map(build);
+  return trees.length>1?trees:trees[0];
+}
+
+/* ======================= 银墨渲染 ======================= */
+function noSpaceBefore(t){return /^[.,;:!?)\]}'"’”…%\-]/.test(t)||/^(n't|'s|'re|'ve|'ll|'d|'m|'S|n’t|’s)$/.test(t);}
+function wcls(i,pS,sS,pos){return pos==="PUNCT"?"punc":pS.has(i)?"pred":sS.has(i)?"subj":"";}
+function tokData(t){ /* 词法细节挂 data-*，单击弹词法泡；标点不挂 */
+  if(!t||t.pos==="PUNCT")return "";
+  return ' data-tok="1" data-pos="'+esc(t.pos||"")+'" data-tag="'+esc(t.tag||"")
+    +'" data-feats="'+esc(t.feats||"")+'" data-dep="'+esc(t.dep||"")+'" data-lemma="'+esc(t.lemma||"")+'"';
+}
+function lineHtml(T,pS,sS){
+  return T.map((t,k)=>{const sp=(k>0&&!noSpaceBefore(t.text))?" ":"";
+    return sp+'<span class="w '+wcls(t.i,pS,sS,t.pos)+'"'+tokData(t)+'>'+esc(t.text)+"</span>";}).join("");
+}
+function treeHtml(n,pS,sS,isRoot,byI){
+  const rc=isRoot?" rootnd":"";
+  if(n.leaf){const i=(n.tokens&&n.tokens[0]),t=byI[i]||{},cls=pS.has(i)?"pred":sS.has(i)?"subj":"";
+    const tags=(n.label?svTag("const",n.label):"")+svTag("tag",n.tag||n.pos)+featsTags(t.feats);
+    return '<div class="nd'+rc+'"><div class="ndhead"><span class="leafw '+cls+'"'+tokData(t)+">"+esc(n.text)+"</span>"+tags+"</div></div>";}
+  const head=n.label?'<div class="ndhead">'+svTag(n.lkind||"const",n.label)+"</div>":"";
+  const kids=(n.children||[]).map(c=>treeHtml(c,pS,sS,false,byI)).join("");
+  return '<div class="nd'+rc+'">'+head+kids+"</div>";
+}
+function chunkTag(dep){
+  if(dep==="__predicate")return ztHtml({cn:"谓语",ex:"主句谓语动词——句子的中心，拆句先找它。"});
+  return svTag("dep",dep);
+}
+function shallowHtml(shallow,byI){
+  return (shallow||[]).map(b=>{const cls=b.dep==="__predicate"?"pred":(SUBJ_DEP.has(b.dep)?"subj":"");
+    const inner=(b.tokens||[]).map(i=>{const t=byI[i]||{};return '<span'+tokData(t)+">"+esc(t.text||"")+"</span>";}).join(" ")||esc(b.text);
+    return '<div class="svchunk '+cls+'"><span class="ck">'+inner+"</span> "+chunkTag(b.dep)+"</div>";}).join("");
+}
+function treeOf(res){
+  let tree=res.tree,pseudo=false;const T=res.tokens||[];
+  if(!tree&&T.length){try{tree=derivePseudoTree(T);pseudo=!!tree;}catch(e){tree=null;}}
+  return{tree,pseudo};
+}
+function cardHtml(res,ci){
+  const pS=new Set(res.predicate||[]),sS=new Set(res.subject||[]),T=res.tokens||[];
+  const byI={};T.forEach(t=>byI[t.i]=t);
+  const{tree,pseudo}=treeOf(res);
+  let h='<div class="card">';
+  h+='<div class="cardhd"><span class="cnum">'+(ci+1)+"</span>"
+    +'<span class="ceng">'+esc(res.engine||"")+(res.tree?" · 成分树":pseudo?" · 依存推导 · 伪成分块":" · 依存分层")+"</span>"
+    +(res.cloud?'<span class="svcloud">cloud · udpipe</span>':"")
+    +'<button class="ccopy" data-ci="'+ci+'">复制结构</button></div>';
+  h+='<div class="svline">'+lineHtml(T,pS,sS)+"</div>";
+  if(tree){const ts=Array.isArray(tree)?tree:[tree];
+    h+='<div class="svtree">'+ts.map(t=>treeHtml(t,pS,sS,true,byI)).join("")+"</div>";}
+  else h+='<div class="svtree">'+shallowHtml(res.shallow,byI)+"</div>";
+  h+="</div>";
+  return h;
+}
+/* 结构大纲纯文本（复制用） */
+function outlineText(res){
+  const{tree}=treeOf(res);const T=res.tokens||[];
+  const pS=new Set(res.predicate||[]),sS=new Set(res.subject||[]);
+  const lines=[res.sentence||T.map(t=>t.text).join(" ")];
+  function walk(n,depth){
+    const ind="  ".repeat(depth);
+    if(n.leaf){const i=n.tokens&&n.tokens[0],role=pS.has(i)?"谓":sS.has(i)?"主":"";
+      lines.push(ind+"· "+n.text+(role?" ["+role+"]":""));return;}
+    const lab=n.label?zhLabel(n.lkind||"const",n.label).cn:"";
+    if(lab)lines.push(ind+"▸ "+lab);
+    (n.children||[]).forEach(c=>walk(c,lab?depth+1:depth));
+  }
+  if(tree){(Array.isArray(tree)?tree:[tree]).forEach(t=>walk(t,1));}
+  else (res.shallow||[]).forEach(b=>{const nm=b.dep==="__predicate"?"谓语":zhLabel("dep",b.dep).cn;lines.push("  ▸ "+nm+"："+b.text);});
+  return lines.join("\n");
+}
+
+/* ======================= 云解（UDPipe LINDAT）· 段落多句 ======================= */
+const PCACHE={};let pInflight=false,cloudFailT=0;
+let CARDS=[];
+function setHint(msg,ttl,busy){const h=$("#dhint");h.textContent=msg||"";h.className=busy?"busy":"";
+  if(ttl)setTimeout(()=>{if(h.textContent===msg){h.textContent="";h.className="";}},ttl);}
+function renderResults(results,s){
+  CARDS=results;
+  $("#empty").classList.add("hide");
+  $("#results").innerHTML=results.map((r,i)=>cardHtml(r,i)).join("");
+}
+function runParse(s){
+  s=String(s||"").replace(/\s+$/,"").replace(/^\s+/,"");
+  if(!s){setHint("投书口是空的 —— 请投一句或一段英文。",4200);return;}
+  if(s.length>6000){setHint("文本太长（超过 6000 字）—— 请分段投。",4500);return;}
+  let alpha=0;for(const ch of s)if(/[A-Za-z]/.test(ch))alpha++;
+  if(alpha<2){setHint("这似乎不是英文 —— 银墨只解英文。",4500);return;}
+  if(PCACHE[s]){setHint("");renderResults(PCACHE[s],s);pushHist(s);return;}
+  if(pInflight)return;
+  if(now()-cloudFailT<5000){setHint("云端解析暂不可达 · 稍后重试",5000);return;}
+  pInflight=true;setHint("银墨解析中 · 云 …",0,true);
+  const body=new URLSearchParams({data:s,model:"english-ewt",tokenizer:"",tagger:"",parser:""});
+  fetch(UDPIPE_URL,{method:"POST",body})
+    .then(r=>{if(!r.ok)throw 0;return r.json();})
+    .then(j=>{
+      const sents=conlluSplit(j&&j.result);
+      if(!sents.length)throw 0;
+      const results=sents.map(sen=>{const a=analyseDep(sen.tokens);
+        return{ok:true,engine:"udpipe · english-ewt",cloud:true,sentence:sen.text,tokens:sen.tokens,
+          roots:a.roots,predicate:a.predicate,subject:a.subject,shallow:a.shallow,tree:null};});
+      pInflight=false;setHint("");
+      const ks=Object.keys(PCACHE);if(ks.length>=40)delete PCACHE[ks[0]];PCACHE[s]=results;
+      pushHist(s);renderResults(results,s);
+    })
+    .catch(()=>{pInflight=false;cloudFailT=now();setHint("云端解析暂不可达 · 稍后重试",6000);});
+}
+
+/* ======================= 历史（本地 · 50 条） ======================= */
+const HK="parse_hist_v1";let HIST=[];
+function loadHist(){try{HIST=JSON.parse(localStorage.getItem(HK)||"[]")||[];}catch(e){HIST=[];}}
+function saveHist(){try{localStorage.setItem(HK,JSON.stringify(HIST.slice(0,50)));}catch(e){}}
+function pushHist(s){s=String(s||"").trim();if(!s)return;
+  HIST=HIST.filter(h=>h.s!==s);HIST.unshift({t:now(),s});HIST=HIST.slice(0,50);saveHist();renderHist();}
+function renderHist(){
+  const wrap=$("#histwrap"),box=$("#hist");
+  if(!HIST.length){wrap.classList.add("hide");return;}
+  wrap.classList.remove("hide");
+  box.innerHTML=HIST.map((h,i)=>'<div class="hrow" data-hi="'+i+'">'+esc(h.s.slice(0,120))+"</div>").join("");
+}
+
+/* ======================= 词泡 + 词法细节 ======================= */
+const pop=$("#pop");let DPOP_WORD=null;
+function showPop(html,x,y){pop.innerHTML=html;pop.classList.add("on");
+  const r=pop.getBoundingClientRect();
+  let L=Math.min(Math.max(8,x-r.width/2),innerWidth-r.width-8);
+  let T=y-r.height-14;if(T<8)T=y+22;
+  pop.style.left=L+"px";pop.style.top=T+"px";}
+function hidePop(){pop.classList.remove("on");DPOP_WORD=null;}
+document.addEventListener("pointerdown",e=>{if(!e.target.closest("#pop"))hidePop();},true);
+/* 单击词：词法细节（词性 / 形态 / 句中角色） */
+function wordDetailPop(w,x,y){
+  const word=w.textContent,pos=w.dataset.pos||"",tag=w.dataset.tag||"",feats=w.dataset.feats||"",
+    dep=w.dataset.dep||"",lemma=w.dataset.lemma||"";
+  const posZ=zhLabel("pos",pos),tagZ=zhLabel("tag",tag),depZ=zhLabel("dep",dep),fl=featsList(feats);
+  let h='<div class="pw">'+esc(word)+(lemma&&lemma.toLowerCase()!==word.toLowerCase()?' <span class="pwph">原形 '+esc(lemma)+"</span>":"")+"</div>";
+  h+='<div class="pdrow"><span class="pdk">词性</span>'+esc(posZ.cn)
+    +(tag&&tag!==pos&&!tagZ.untr&&tagZ.cn!==posZ.cn?'<span class="pdt">'+esc(tagZ.cn)+"</span>":"")+"</div>";
+  if(fl.length)h+='<div class="pdrow"><span class="pdk">形态</span>'+fl.map(f=>esc(f.cn)).join(" · ")+"</div>";
+  h+='<div class="pdrow"><span class="pdk">角色</span>'+esc(depZ.cn)+"</div>";
+  if(depZ.ex&&!depZ.untr)h+='<div class="pg">'+esc(depZ.ex)+"</div>";
+  h+='<div class="dictlink" data-w="'+esc(word)+'">双击查词典 ›</div>';
+  showPop(h,x,y);
+}
+/* 双击词：词典泡（全本层） */
+function dictPop(word,x,y){word=String(word||"").trim();if(!word)return;
+  DPOP_WORD={word,x,y};ensureFull();showPop(popContent(word),x,y);}
+function popContent(word){
+  const dl='<div class="dictlink" data-w="'+esc(word)+'">全文词典 ›</div>';
+  if(!DFULL){
+    if(DFLoad===1)return '<div class="pw">'+esc(word)+'</div><div class="pg">载入牛津全本 · '+esc(DFPct||"0%")+" …</div>";
+    if(DFLoad===3)return '<div class="pw">'+esc(word)+'</div><div class="pg">词典载入失败 · <span class="dictlink" data-retry="1" data-w="'+esc(word)+'">重试</span></div>';
+    return '<div class="pw">'+esc(word)+'</div><div class="pg">载入牛津全本 …</div>';
+  }
+  const fh=fullOf(word);
+  if(!fh)return '<div class="pw">'+esc(word)+'</div><div class="pg">牛津高阶未收此词。</div>'+dl;
+  const key=fh[0],F=fh[1],e0=(F.es&&F.es[0])||{};
+  let h='<div class="pw">'+esc(word)+(e0.p?' <span class="pwph">'+esc(e0.p)+"</span>":"")+"</div>";
+  if(key!==word.toLowerCase())h+='<div class="pb">→ '+esc(key)+"</div>";
+  const rows=[];let cnt=0;
+  (F.es||[]).forEach(e=>{(e.gs||[]).forEach(grp=>{(grp.ss||[]).forEach(s=>{
+    if(cnt>=8)return;const cn=(s.cn||s.en||"").split(/[；;]/)[0].trim();if(!cn)return;cnt++;
+    rows.push('<div class="pl">'+(e.pos?"<b>"+esc(e.pos)+"</b>":"")+(s.g?'<span class="pgt">'+esc(gAbbr(s.g))+"</span>":"")+esc(cn)+"</div>");
+  });});});
+  return h+rows.join("")+dl;
+}
+
+/* ======================= 词典 · 全本层（手抄自 universe；只用全本层 __DICT_FULL，同域懒加载） ======================= */
+/* 说明：本站不随包紧凑层 __DICT/ECDICT——只拉 ../universe/dict_data.js（window.__DICT_FULL，牛津高阶10 全本 11095 词），
+   取词/泡/页均自全本层结构自足渲染；未收词优雅降级。见 CLAUDE.md tools/parse_site 条目。 */
+const DICT_URLS=(window.__DICT_URL?[window.__DICT_URL]:[]).concat(["../universe/dict_data.js","https://tricgrizen.com/universe/dict_data.js"]);
+let DFULL=window.__DICT_FULL||null, DFLoad=DFULL?2:0; /* 0未试 1载入中 2成 3败 */
+let DFPct="", DFSlow=false, DFcb=[];
+function gAbbr(g){return String(g||"").replace(/[\[\]]/g,"")
+  .replace(/uncountable/g,"U").replace(/countable/g,"C")
+  .replace(/intransitive/g,"I").replace(/transitive/g,"T")
+  .replace(/singular/g,"sing.").replace(/plural/g,"pl.")
+  .replace(/usually /g,"usu ").replace(/before noun/g,"attrib.").replace(/after noun/g,"postpos.")
+  .replace(/not used in the progressive tenses/g,"无进行时").replace(/no passive/g,"无被动").replace(/\s*,\s*/g,",");}
+function dpaint(){ /* 载入态迁移时重渲开着的词典页/词泡 */
+  if(DSTACK.length&&$("#dpage").classList.contains("on"))renderDictPage();
+  if(DPOP_WORD&&pop.classList.contains("on"))showPop(popContent(DPOP_WORD.word),DPOP_WORD.x,DPOP_WORD.y);
+}
+function ensureFull(cb){if(cb)DFcb.push(cb);loadDictFull();}
+function loadDictFull(){
+  if(DFULL||DFLoad===1||DFLoad===3)return;
+  DFLoad=1;DFPct="0%";DFSlow=false;
+  const slowT=setTimeout(()=>{DFSlow=true;if(DFLoad===1)dpaint();},8000);
+  (async function(){
+    const BACKOFF=[1500,4000,8000];
+    for(let attempt=0;attempt<DICT_URLS.length+2;attempt++){
+      const url=DICT_URLS[Math.min(attempt,DICT_URLS.length-1)];
+      try{
+        const resp=await fetch(url,{cache:"default"});
+        if(!resp.ok||!resp.body)throw 0;
+        let total=+(resp.headers.get("X-Full-Bytes")||resp.headers.get("Content-Length")||0);
+        const rd=resp.body.getReader(),chunks=[];let recv=0,mb=false;
+        for(;;){const r=await rd.read();if(r.done)break;
+          chunks.push(r.value);recv+=r.value.length;
+          if(total&&recv>total*1.02)mb=true;
+          DFPct=(!total||mb)?(recv/1048576).toFixed(1)+"MB":Math.min(99,(recv/total*100)|0)+"%";
+          if(DFLoad===1)dpaint();}
+        const burl=URL.createObjectURL(new Blob(chunks,{type:"application/javascript"}));
+        await new Promise((res,rej)=>{const sc=document.createElement("script");sc.src=burl;sc.onload=res;sc.onerror=rej;document.head.appendChild(sc);});
+        URL.revokeObjectURL(burl);
+        DFULL=window.__DICT_FULL||null;if(!DFULL)throw 0;
+        clearTimeout(slowT);DFLoad=2;DFPct="";dpaint();
+        const cbs=DFcb;DFcb=[];cbs.forEach(f=>{try{f();}catch(e){}});return;
+      }catch(e){if(attempt<DICT_URLS.length+1)await new Promise(r=>setTimeout(r,BACKOFF[Math.min(attempt,BACKOFF.length-1)]));}
+    }
+    clearTimeout(slowT);DFLoad=3;dpaint();
+  })();
+}
+function retryDictFull(){if(DFULL)return;DFLoad=0;DFPct="";DFSlow=false;loadDictFull();}
+function fullOf(raw){
+  if(!DFULL)return null;
+  let w=String(raw||"").toLowerCase().replace(/[’']s$/,"").replace(/^['-]+|['-]+$/g,"");
+  if(!w)return null;
+  if(DFULL[w])return[w,DFULL[w]];
+  const c=[];
+  if(w.endsWith("ies"))c.push(w.slice(0,-3)+"y");
+  if(w.endsWith("es"))c.push(w.slice(0,-2));
+  if(w.endsWith("s"))c.push(w.slice(0,-1));
+  if(w.endsWith("ied"))c.push(w.slice(0,-3)+"y");
+  if(w.endsWith("ed")){c.push(w.slice(0,-2),w.slice(0,-1));if(w.length>4&&w[w.length-3]===w[w.length-4])c.push(w.slice(0,-3));}
+  if(w.endsWith("ing")){c.push(w.slice(0,-3),w.slice(0,-3)+"e");if(w.length>5&&w[w.length-4]===w[w.length-5])c.push(w.slice(0,-4));}
+  if(w.endsWith("ly"))c.push(w.slice(0,-2));
+  if(w.endsWith("er")){c.push(w.slice(0,-2),w.slice(0,-1));}
+  if(w.endsWith("est")){c.push(w.slice(0,-3),w.slice(0,-2));}
+  for(const v of c)if(DFULL[v])return[v,DFULL[v]];
+  return null;
+}
+/* —— 全本页渲染件（手抄自 universe） —— */
+function dwrap(text){text=String(text||"");let out="",last=0,re=/[A-Za-z][A-Za-z'\-]*/g,m;
+  while((m=re.exec(text))){out+=esc(text.slice(last,m.index))+'<span class="dw">'+esc(m[0])+"</span>";last=m.index+m[0].length;}
+  return out+esc(text.slice(last));}
+function vfChips(vf){const out=[],seen={};
+  (vf||[]).forEach(r=>{let m,k=null,v="";
+    if((m=r.match(/^he \/ she \/ it (\S+)/))){k="三单";v=m[1];}
+    else if((m=r.match(/^past simple (?:I \/ you \/ we \/ they )?(\S+)/))){k="过去式";v=m[1];}
+    else if((m=r.match(/^past participle (\S+)/))){k="过去分词";v=m[1];}
+    else if((m=r.match(/^-ing form (\S+)/))){k="-ing";v=m[1];}
+    if(k&&!seen[k]){seen[k]=1;out.push(k+" "+v);}});
+  return out;}
+function xxRow(x){let en=x[0]||"",zh=x[1]||"";
+  if(!zh){const m=en.match(/[　-〿一-鿿＀-￯]/);if(m&&m.index>0){zh=en.slice(m.index);en=en.slice(0,m.index);}}
+  return '<div class="dex"><div class="een">'+dwrap(en)+"</div>"+(zh?'<div class="ecn">'+esc(zh)+"</div>":"")+"</div>";}
+function blocksHtml(o){let h="";
+  if(o.xx&&o.xx.length)h+='<details class="dfold"><summary>更多例句 · '+o.xx.length+"</summary>"+o.xx.map(xxRow).join("")+"</details>";
+  if(o.co&&o.co.length)h+='<details class="dfold"><summary>搭配 · '+o.co.length+" 组</summary>"
+    +o.co.map(g=>'<div class="dcot">'+esc(g[0])+'</div><div class="dcog">'+dwrap((g[1]||[]).join(", "))+"</div>").join("")+"</details>";
+  (o.xr||[]).forEach(g=>{h+='<div class="dxr"><span class="dxrp">→ '+esc(g[0])+"</span> "+dwrap((g[1]||[]).join(", "))+"</div>";});
+  if(o.wo)h+='<div class="dwo">词源 · '+dwrap(o.wo)+"</div>";
+  (o.nt||[]).forEach(n2=>{h+='<div class="dsyn">'+(n2.t?'<span class="box_title">'+esc(n2.t)+"</span>":"")+(n2.h||"")+"</div>";});
+  return h;}
+function tpChips(tp){return (tp||[]).map(t=>'<span class="dtp">'+esc(t[0])+(t[1]?" · "+esc(t[1]):"")+"</span>").join("");}
+function senseHtml(s,n){let h='<div class="dsense">',head="";
+  if(n)head+='<span class="dnum">'+n+"</span>";
+  if(s.g)head+='<span class="pgt">'+esc(s.g)+"</span>";
+  if(s.lb)head+='<span class="dlb">'+esc(s.lb)+"</span>";
+  if(s.dis)head+='<span class="ddis">'+esc(s.dis)+"</span>";
+  if(s.cf)head+='<span class="dcf">'+esc(s.cf)+"</span>";
+  head+=tpChips(s.tp);
+  if(head)h+='<div class="dshead">'+head+"</div>";
+  if(s.en)h+='<div class="den">'+dwrap(s.en)+"</div>";
+  if(s.cn)h+='<div class="dcn">'+esc(s.cn)+"</div>";
+  (s.ex||[]).forEach(x=>{h+='<div class="dex">'+(x[2]?'<div class="dexcf">'+esc(x[2])+"</div>":"")
+    +'<div class="een">'+dwrap(x[0]||"")+"</div>"+(x[1]?'<div class="ecn">'+esc(x[1])+"</div>":"")+"</div>";});
+  h+=blocksHtml(s);return h+"</div>";}
+function renderFull(key,F,word){
+  let h='<div class="dh">'+esc(word)+"</div>";
+  if(key!==word.toLowerCase())h+='<div class="dbase">→ '+esc(key)+"</div>";
+  const e0=F.es[0]||{};
+  const ph=[];if(e0.p)ph.push("BrE "+e0.p);if(e0.p2)ph.push("NAmE "+e0.p2);
+  if(ph.length)h+='<div class="dph">'+esc(ph.join("　"))+"</div>";
+  const chips=[];
+  F.es.forEach(e=>{if(e.cefr&&chips.indexOf("CEFR "+e.cefr)<0)chips.push("CEFR "+e.cefr);
+    if(e.oxk&&!chips.some(c=>c.indexOf("牛津")===0))chips.push("牛津"+e.oxk);});
+  const vfe=F.es.find(e=>e.vf&&e.vf.length);
+  if(vfe)vfChips(vfe.vf).forEach(c=>chips.push(c));
+  if(chips.length)h+='<div class="dchips">'+chips.map(c=>'<span class="dchip">'+esc(c)+"</span>").join("")+"</div>";
+  if(F.es.length>1)h+='<div class="dpanchors">'+F.es.map((e,i)=>'<span class="danchor" data-i="'+i+'">'+esc(e.pos||("条"+(i+1)))+"</span>").join("")+"</div>";
+  F.es.forEach((e,i)=>{
+    h+='<div class="dentry" id="de_'+i+'">';let eh="";
+    if(e.pos)eh+='<span class="dpos">'+esc(e.pos)+"</span>";
+    if(e.g)eh+='<span class="pgt">'+esc(e.g)+"</span>";
+    if(e.lb)eh+='<span class="dlb">'+esc(e.lb)+"</span>";
+    if(eh)h+='<div class="dentryhead">'+eh+"</div>";
+    if(e.vf&&e.vf.length&&e!==vfe){const vc=vfChips(e.vf);if(vc.length)h+='<div class="dvf">'+vc.map(esc).join(" · ")+"</div>";}
+    let n=0;
+    (e.gs||[]).forEach(grp=>{if(grp.t)h+='<div class="dshcut">'+esc(grp.t)+"</div>";
+      (grp.ss||[]).forEach(s=>{n++;h+=senseHtml(s,n);});});
+    {const tpc=tpChips(e.tp);if(tpc)h+='<div class="dshead">'+tpc+"</div>";h+=blocksHtml(e);}
+    if(e.idm&&e.idm.length){h+='<div class="dsect">习语</div>';
+      e.idm.forEach(i2=>{h+='<div class="didm"><div class="didmw">'+dwrap(i2.w)+(i2.lb?' <span class="dlb">'+esc(i2.lb)+"</span>":"")+"</div>";
+        (i2.ss||[]).forEach(s=>{h+=senseHtml(s,0);});h+="</div>";});}
+    h+="</div>";});
+  if(F.pv&&F.pv.length){h+='<div class="dsect">短语动词</div>';
+    F.pv.forEach(p=>{h+='<div class="dpv"><div class="dpvw">'+dwrap(p.w)+"</div>";let pn=0;
+      (p.es||[]).forEach(pe=>{let peh="";
+        if(pe.g)peh+='<span class="pgt">'+esc(pe.g)+"</span>";if(pe.lb)peh+='<span class="dlb">'+esc(pe.lb)+"</span>";
+        if(peh)h+='<div class="dentryhead">'+peh+"</div>";
+        (pe.gs||[]).forEach(grp=>{if(grp.t)h+='<div class="dshcut">'+esc(grp.t)+"</div>";
+          (grp.ss||[]).forEach(s=>{pn++;h+=senseHtml(s,pn);});});});h+="</div>";});}
+  (F.syn||[]).forEach(sy=>{h+='<div class="dsect">'+esc(sy.t||"辨析")+'</div><div class="dsyn">'+sy.h+"</div>";});
+  return h;
+}
+let DSTACK=[];
+function renderDictPage(){
+  const word=DSTACK[DSTACK.length-1];loadDictFull();
+  let h="";
+  if(!DFULL&&DFLoad===1)h+='<div class="dload">LOADING '+esc(DFPct||"0%")+(DFSlow?'<span class="dslow">全本约 34MB，弱网请稍候</span>':"")+"</div>";
+  else if(!DFULL&&DFLoad===3)h+='<div class="dload">全本词典载入失败 · <span class="dretry">重试</span></div>';
+  const fh=DFULL?fullOf(word):null;
+  h+=fh?renderFull(fh[0],fh[1],word):('<div class="dh">'+esc(word)+"</div>"+(DFULL?'<div class="dnote">牛津高阶未收此词。</div>':'<div class="dnote">正在载入全本词典…</div>'));
+  $("#dbody").innerHTML=h;
+  $$("#dbody .danchor").forEach(a=>{a.onclick=()=>{const t=$("#de_"+a.dataset.i);if(t)t.scrollIntoView();};});
+  $("#dpage").scrollTop=0;
+}
+function openDictPage(word){word=String(word||"").trim();if(!word)return;
+  hidePop();DSTACK.push(word);ensureFull();renderDictPage();$("#dpage").classList.add("on");}
+function dictBack(){DSTACK.pop();if(DSTACK.length)renderDictPage();else{DSTACK=[];$("#dpage").classList.remove("on");}}
+
+/* ======================= 事件委托 ======================= */
+$("#dgo").addEventListener("click",()=>runParse($("#dinput").value));
+$("#dinput").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){e.preventDefault();runParse(e.target.value);}});
+$("#dclear").addEventListener("click",()=>{$("#dinput").value="";$("#dinput").focus();});
+$("#dclip").addEventListener("click",()=>{
+  if(!navigator.clipboard||!navigator.clipboard.readText){setHint("此浏览器不支持取贴 —— 请直接粘贴。",4000);return;}
+  navigator.clipboard.readText().then(t=>{t=String(t||"").trim();
+    if(!t){setHint("剪贴板里没有文本。",3500);return;}
+    $("#dinput").value=t;runParse(t);})
+    .catch(()=>setHint("取贴被拒 —— 请手动粘贴。",4000));});
+/* 结果区：单击词=词法泡 / 双击词=词典泡 / 小签=解释泡 / 复制结构 */
+$("#results").addEventListener("click",e=>{
+  const zt=e.target.closest(".zt");
+  if(zt){if(zt.dataset.ex)showPop('<div class="pg">'+esc(zt.dataset.ex)+"</div>",e.clientX,e.clientY);return;}
+  const cp=e.target.closest(".ccopy");
+  if(cp){const r=CARDS[+cp.dataset.ci];if(r)copyText(outlineText(r),cp);return;}
+  const w=e.target.closest("[data-tok]");if(w)wordDetailPop(w,e.clientX,e.clientY);
+});
+$("#results").addEventListener("dblclick",e=>{
+  const w=e.target.closest("[data-tok]");if(!w)return;
+  const sel=(window.getSelection()+"").trim();
+  const word=(sel&&/^[A-Za-z]/.test(sel)&&sel.split(/\s+/)[0].replace(/[^A-Za-z'\-]/g,""))||w.textContent;
+  dictPop(word,e.clientX,e.clientY);
+});
+$("#hist").addEventListener("click",e=>{const r=e.target.closest(".hrow");if(!r)return;
+  const h=HIST[+r.dataset.hi];if(h){$("#dinput").value=h.s;runParse(h.s);window.scrollTo(0,0);}});
+$("#histclr").addEventListener("click",()=>{HIST=[];saveHist();renderHist();});
+$("#dback").addEventListener("click",dictBack);
+$("#abtn").addEventListener("click",()=>$("#about").classList.add("on"));
+$("#about .abx").addEventListener("click",()=>$("#about").classList.remove("on"));
+/* 词典链接 / 页内点词即跳 / 重试 */
+document.addEventListener("click",e=>{
+  if(e.target.closest(".dretry")){retryDictFull();return;}
+  const rl=e.target.closest("[data-retry]");if(rl){retryDictFull();return;}
+  const dl=e.target.closest(".dictlink");if(dl){openDictPage(dl.dataset.w);return;}
+  const dw=e.target.closest("#dbody .dw");if(dw){openDictPage(dw.textContent);}
+});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"){
+  if($("#dpage").classList.contains("on")){dictBack();return;}
+  if($("#about").classList.contains("on")){$("#about").classList.remove("on");return;}
+  if(pop.classList.contains("on"))hidePop();}});
+function copyText(txt,btn){
+  const done=()=>{if(btn){const o=btn.textContent;btn.textContent="已复制";setTimeout(()=>btn.textContent=o,1400);}};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(done).catch(()=>fallback());
+  else fallback();
+  function fallback(){try{const ta=document.createElement("textarea");ta.value=txt;ta.style.position="fixed";ta.style.opacity="0";
+    document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);done();}catch(e){}}
+}
+
+/* ======================= 手机适配（视口钳 + 双 tap 合成 dblclick；手抄自 universe mobilePatch） ======================= */
+function mobilePatch(){
+  try{if(navigator.standalone===true||(window.matchMedia&&window.matchMedia("(display-mode: standalone)").matches))
+    document.documentElement.classList.add("kysa");}catch(e){}
+  try{const reclamp=function(){const m=document.querySelector("meta[name=viewport]");if(!m)return;
+    const w=window.innerWidth||screen.width||9999,clamp=!!(w&&w<500);
+    const want=clamp?"width=500, viewport-fit=cover":"width=device-width, initial-scale=1, viewport-fit=cover";
+    if(m.getAttribute("content")!==want)m.setAttribute("content",want);};
+    reclamp();window.addEventListener("orientationchange",()=>setTimeout(reclamp,120));
+    window.addEventListener("resize",()=>setTimeout(reclamp,120));}catch(e){}
+  if(!("ontouchstart" in window))return;
+  const stl=document.createElement("style");
+  stl.textContent="html,body,body *{touch-action:manipulation;}.svline .w,.leafw,#dbody .dw{-webkit-touch-callout:none;}";
+  document.head.appendChild(stl);
+  let lt=0,lx=0,ly=0,lel=null;
+  document.addEventListener("touchend",function(e){
+    if(e.touches&&e.touches.length)return;
+    const t=e.changedTouches&&e.changedTouches[0];if(!t)return;
+    if(e.target&&e.target.closest&&e.target.closest("textarea,input,button,#about"))return;
+    const n=Date.now(),db=(n-lt)<450&&Math.hypot(t.clientX-lx,t.clientY-ly)<44;
+    if(!db){lt=n;lx=t.clientX;ly=t.clientY;lel=e.target;return;}
+    const px=lx,py=ly,pel=(lel&&lel.isConnected)?lel:null;lt=0;lel=null;
+    setTimeout(function(){
+      selectWordAt(px,py);
+      const tgt=pel||document.elementFromPoint(px,py)||document.body;let ev;
+      try{ev=new MouseEvent("dblclick",{bubbles:true,cancelable:true,view:window,clientX:px,clientY:py});}
+      catch(err){ev=document.createEvent("MouseEvents");ev.initMouseEvent("dblclick",true,true,window,2,0,0,px,py,false,false,false,false,0,null);}
+      tgt.dispatchEvent(ev);
+    },120);
+  },{passive:true});
+  function selectWordAt(x,y){try{const r=document.caretRangeFromPoint?document.caretRangeFromPoint(x,y):null;
+    if(!r||r.startContainer.nodeType!==3)return;
+    const node=r.startContainer,s=node.textContent;let a=r.startOffset,b=a;
+    while(a>0&&/[A-Za-z'\-]/.test(s.charAt(a-1)))a--;
+    while(b<s.length&&/[A-Za-z'\-]/.test(s.charAt(b)))b++;
+    if(b<=a)return;const rng=document.createRange();rng.setStart(node,a);rng.setEnd(node,b);
+    const sel=window.getSelection();sel.removeAllRanges();sel.addRange(rng);}catch(e){}}
+}
+
+/* ======================= selftest（离线，无网络断言） ======================= */
+const CU_REL="# text = The book that he read was fascinating.\n"
++"1\tThe\tthe\tDET\tDT\tDefinite=Def|PronType=Art\t2\tdet\t_\t_\n"
++"2\tbook\tbook\tNOUN\tNN\tNumber=Sing\t6\tnsubj\t_\t_\n"
++"3\tthat\tthat\tPRON\tWDT\tPronType=Rel\t5\tobj\t_\t_\n"
++"4\the\the\tPRON\tPRP\tCase=Nom|Number=Sing|Person=3|PronType=Prs\t5\tnsubj\t_\t_\n"
++"5\tread\tread\tVERB\tVBD\tMood=Ind|Tense=Past|VerbForm=Fin\t2\tacl:relcl\t_\t_\n"
++"6\twas\tbe\tAUX\tVBD\tMood=Ind|Tense=Past|VerbForm=Fin\t0\troot\t_\t_\n"
++"7\tfascinating\tfascinate\tADJ\tJJ\tDegree=Pos\t6\tacomp\t_\t_\n"
++"8\t.\t.\tPUNCT\t.\t_\t6\tpunct\t_\t_\n";
+const CU_INF="# text = I want to go home.\n"
++"1\tI\tI\tPRON\tPRP\tCase=Nom\t2\tnsubj\t_\t_\n"
++"2\twant\twant\tVERB\tVBP\tTense=Pres|VerbForm=Fin\t0\troot\t_\t_\n"
++"3\tto\tto\tPART\tTO\t_\t4\tmark\t_\t_\n"
++"4\tgo\tgo\tVERB\tVB\tVerbForm=Inf\t2\txcomp\t_\t_\n"
++"5\thome\thome\tNOUN\tNN\tNumber=Sing\t4\tobl\t_\t_\n"
++"6\t.\t.\tPUNCT\t.\t_\t2\tpunct\t_\t_\n";
+const CU_PARA="# text = She runs.\n1\tShe\tshe\tPRON\tPRP\tCase=Nom\t2\tnsubj\t_\t_\n2\truns\trun\tVERB\tVBZ\tNumber=Sing|Person=3|Tense=Pres|VerbForm=Fin\t0\troot\t_\t_\n3\t.\t.\tPUNCT\t.\t_\t2\tpunct\t_\t_\n\n"
++"# text = He sleeps.\n1\tHe\the\tPRON\tPRP\tCase=Nom\t2\tnsubj\t_\t_\n2\tsleeps\tsleep\tVERB\tVBZ\tNumber=Sing|Person=3|Tense=Pres|VerbForm=Fin\t0\troot\t_\t_\n3\t.\t.\tPUNCT\t.\t_\t2\tpunct\t_\t_\n";
+function selftest(){
+  const A=[];function ok(n,c){A.push((c?"✓":"✗")+" "+n);if(!c)A._bad=true;}
+  try{
+    ok("银墨函数在", typeof conlluSplit==="function"&&typeof analyseDep==="function"&&typeof derivePseudoTree==="function"&&typeof runParse==="function");
+    const T=conlluParse(CU_REL);
+    ok("conlluParse 八词+FEATS留存", T.length===8&&T[4].feats.indexOf("Tense=Past")>=0);
+    const a=analyseDep(T);
+    ok("analyseDep 主谓识别", a.roots.length===1&&a.predicate.length>=1&&a.subject.length>=1&&a.subject.indexOf(1)>=0);
+    const tree=derivePseudoTree(T);
+    ok("derivePseudoTree 出树", !!tree&&typeof (Array.isArray(tree)?tree[0]:tree).children==="object");
+    const Ti=conlluParse(CU_INF),ti=derivePseudoTree(Ti);
+    let foundInf=false;(function scan(n){if(!n)return;if(n.label==="INFP")foundInf=true;(n.children||[]).forEach(scan);})(Array.isArray(ti)?ti[0]:ti);
+    ok("不定式 INFP 识别", foundInf);
+    const sents=conlluSplit(CU_PARA);
+    ok("段落拆两句", sents.length===2&&sents[0].tokens.length===3&&sents[1].tokens.length===3&&sents[0].tokens[0].i===0&&sents[1].tokens[0].i===0);
+    const fz=featsList("Tense=Past|Voice=Pass|Number=Sing");
+    ok("FEATS 汉化", fz.length===3&&fz[0].cn==="过去时"&&fz.some(f=>f.cn==="被动语态")&&fz.some(f=>f.cn==="单数"));
+    const z1=zhLabel("dep","nsubj"),z2=zhLabel("dep","obl:tmod"),z3=zhLabel("pos","ZZZ");
+    ok("zhLabel 命中/冒号回落/未译", z1.cn==="主语"&&z2.cn==="时间状语"&&z3.untr===true);
+    const c=cardHtml(sents.map(sen=>{const aa=analyseDep(sen.tokens);return{ok:1,engine:"x",cloud:1,sentence:sen.text,tokens:sen.tokens,predicate:aa.predicate,subject:aa.subject,shallow:aa.shallow,tree:null};})[0],0);
+    ok("cardHtml 出词法 data 属性", c.indexOf('data-tok="1"')>=0&&c.indexOf("svline")>=0&&c.indexOf("svtree")>=0);
+    const ot=outlineText({sentence:"x",tokens:T,predicate:a.predicate,subject:a.subject,shallow:a.shallow,tree:null});
+    ok("outlineText 缩进大纲", ot.split("\n").length>3);
+    ok("词典函数在", typeof loadDictFull==="function"&&typeof fullOf==="function"&&typeof renderFull==="function"&&typeof popContent==="function");
+    ok("云端直连 origin（非本机炉）", UDPIPE_URL.indexOf("lindat")>=0&&DICT_URLS.some(u=>u.indexOf("universe/dict_data.js")>=0));
+  }catch(e){A.push("✗ 异常 "+(e&&e.message||e));A._bad=true;}
+  const pass=A.filter(x=>x[0]==="✓").length,tot=A.length;
+  const st=$("#st");st.classList.add("on");if(A._bad)st.classList.add("bad");
+  st.textContent="PARSE-SITE "+(A._bad?"FAIL":"PASS")+" "+pass+"/"+tot+"\n"+A.join("\n");
+}
+
+/* ======================= 调试句柄 ======================= */
+window.__P={runParse,conlluSplit,conlluParse,analyseDep,derivePseudoTree,zhLabel,featsList,cardHtml,outlineText,
+  fullOf,loadDictFull,dictPop,openDictPage,renderFull,popContent,HIST,get DFULL(){return DFULL;},get DFLoad(){return DFLoad;}};
+
+/* ======================= boot ======================= */
+(function boot(){
+  mobilePatch();
+  loadHist();renderHist();
+  if(ST){selftest();return;}
+  const q=Q.get("q");
+  if(q){$("#dinput").value=q;setTimeout(()=>runParse(q),60);}
+  if(Q.get("dict"))setTimeout(()=>openDictPage(Q.get("dict")),120);
+  if(Q.get("pop"))setTimeout(()=>dictPop(Q.get("pop"),innerWidth/2,innerHeight/2),200);
+})();
+</script>
+</body>
+</html>
